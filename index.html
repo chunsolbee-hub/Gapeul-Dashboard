@@ -50,23 +50,34 @@
         <h2>사건 총집합</h2>
         <div class="toolbar-actions">
           <input type="search" id="case-search" placeholder="사건번호 / 의뢰인 / 사건명 검색" />
+          <button type="button" id="export-csv-btn" class="btn btn-ghost">⬇ CSV 백업</button>
+          <button type="button" id="export-json-btn" class="btn btn-ghost">⬇ JSON 백업</button>
           <button id="new-case-btn" class="btn btn-primary">+ 새 사건 등록</button>
         </div>
+      </div>
+      <div class="case-subtabs" id="case-subtabs">
+        <button type="button" class="subtab-btn active" data-subtab="all">전체</button>
+        <button type="button" class="subtab-btn" data-subtab="civil">민사</button>
+        <button type="button" class="subtab-btn" data-subtab="civil-soon">민사 · 2주 이내</button>
+        <button type="button" class="subtab-btn" data-subtab="criminal">형사</button>
+        <button type="button" class="subtab-btn" data-subtab="criminal-soon">형사 · 2주 이내</button>
       </div>
       <div class="table-wrap">
         <table class="case-table">
           <thead>
             <tr>
               <th>사건번호</th>
-              <th>사건명</th>
-              <th>의뢰인</th>
+              <th class="sortable" data-sort="caseName">사건명<span class="sort-arrow"></span></th>
+              <th class="sortable" data-sort="clientName">의뢰인<span class="sort-arrow"></span></th>
               <th>구분</th>
               <th>의뢰인 신분</th>
               <th>사건분류</th>
               <th>법원</th>
-              <th>피고인수</th>
+              <th class="sortable" data-sort="retainedDate">의뢰일자<span class="sort-arrow"></span></th>
+              <th class="sortable" data-sort="pleadingDate">변론기일<span class="sort-arrow"></span></th>
+              <th class="sortable" data-sort="trialDate">재판기일<span class="sort-arrow"></span></th>
+              <th>피고 수</th>
               <th>대응현황</th>
-              <th>다음 기일</th>
               <th></th>
             </tr>
           </thead>
@@ -193,6 +204,12 @@
         </label>
       </div>
 
+      <div class="form-row">
+        <label>의뢰일자
+          <input type="date" id="f-retainedDate" />
+        </label>
+      </div>
+
       <div class="form-section" id="defendant-section">
         <div class="form-section-header">
           <h4>상대방(피고) 목록</h4>
@@ -208,6 +225,11 @@
           <button type="button" id="add-hearing-btn" class="btn btn-sm">+ 기일 추가</button>
         </div>
         <div id="hearing-list" class="hearing-list"></div>
+      </div>
+
+      <div class="form-section">
+        <h4>비고</h4>
+        <textarea id="f-memo" rows="3" placeholder="메모를 입력하세요 (선택)"></textarea>
       </div>
 
       <div class="modal-footer">

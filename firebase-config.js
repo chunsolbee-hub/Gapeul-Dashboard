@@ -4,10 +4,10 @@
 // 실제 데이터 보호는 Firestore 보안 규칙 + 로그인(Authentication)이 담당합니다.
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyBtSG5eeIdbzbnA4iulbe5BjjnDnwYTICw",
-  authDomain: "gapeul-dashboard.firebaseapp.com",
-  projectId: "gapeul-dashboard",
-  storageBucket: "gapeul-dashboard.firebasestorage.app",
-  messagingSenderId: "326920595924",
-  appId: "1:326920595924:web:771785fcda1f5d06fbce41"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };

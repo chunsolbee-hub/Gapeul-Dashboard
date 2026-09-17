@@ -154,6 +154,20 @@ input, select {
   min-width: 220px;
 }
 
+/* ---------- Case sub-tabs (전체/민사/형사/2주 이내) ---------- */
+.case-subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.subtab-btn {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.subtab-btn:hover { background: var(--color-bg); }
+.subtab-btn.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
 /* ---------- Buttons ---------- */
 .btn {
   border: 1px solid var(--color-border);
@@ -181,7 +195,7 @@ input, select {
   box-shadow: var(--shadow);
   overflow-x: auto;
 }
-.case-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 920px; }
+.case-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 1200px; }
 .case-table th {
   text-align: left;
   padding: 10px 14px;
@@ -191,6 +205,12 @@ input, select {
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
 }
+.case-table th.sortable { cursor: pointer; user-select: none; }
+.case-table th.sortable:hover { color: var(--color-text); }
+.sort-arrow { display: inline-block; width: 10px; margin-left: 2px; font-size: 10px; }
+.sort-arrow::after { content: ""; }
+.case-table th.sort-asc .sort-arrow::after { content: "▲"; }
+.case-table th.sort-desc .sort-arrow::after { content: "▼"; }
 .case-table td {
   padding: 10px 14px;
   border-bottom: 1px solid var(--color-border);
@@ -258,10 +278,11 @@ input, select {
   background: var(--color-success-bg);
   color: var(--color-success);
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
 }
+.cal-event-case { display: block; font-weight: 800; }
+.cal-event-sub { display: block; font-weight: 500; opacity: 0.85; }
 .cal-event.incomplete { background: var(--color-danger-bg); color: var(--color-danger); }
 .cal-event.upcoming { box-shadow: inset 0 0 0 1px var(--color-upcoming); }
 
@@ -317,10 +338,12 @@ input, select {
 .modal-close { background: none; border: none; font-size: 22px; line-height: 1; color: var(--color-text-muted); }
 .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .modal-body label { font-size: 12px; font-weight: 700; color: var(--color-text-muted); display: block; }
-.modal-body input, .modal-body select {
+.modal-body input, .modal-body select, .modal-body textarea {
   display: block; width: 100%; margin-top: 5px;
   padding: 9px 11px; border: 1px solid var(--color-border); border-radius: 8px;
+  font-family: inherit; font-size: 14px;
 }
+.modal-body textarea { resize: vertical; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .form-section { border-top: 1px solid var(--color-border); padding-top: 14px; }
 .form-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
