@@ -133,7 +133,7 @@ input, select {
 .header-right { display: flex; align-items: center; gap: 12px; }
 .user-email { font-size: 12px; color: var(--color-text-muted); }
 
-.app-main { flex: 1; padding: 24px; max-width: 1200px; margin: 0 auto; width: 100%; }
+.app-main { flex: 1; padding: 24px; max-width: 1600px; margin: 0 auto; width: 100%; }
 
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
@@ -215,6 +215,7 @@ input, select {
   padding: 10px 14px;
   border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
+  white-space: nowrap;
 }
 .case-table tbody tr:hover { background: #f9fafb; cursor: pointer; }
 .case-table tbody tr:last-child td { border-bottom: none; }
