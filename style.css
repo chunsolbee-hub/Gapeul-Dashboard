@@ -185,6 +185,8 @@ input, select {
 .btn-ghost:hover { background: var(--color-bg); }
 .btn-danger { background: var(--color-danger-bg); color: var(--color-danger); border-color: transparent; }
 .btn-danger:hover { background: #fbd5d5; }
+.btn-warning { background: var(--color-upcoming-bg); color: var(--color-upcoming); border-color: transparent; }
+.btn-warning:hover { background: #fde3b8; }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn-block { width: 100%; margin-top: 4px; }
 
@@ -370,7 +372,7 @@ input, select {
   border-top: 1px solid var(--color-border);
   padding: 14px 20px;
 }
-.footer-right { display: flex; gap: 8px; }
+.footer-left, .footer-right { display: flex; gap: 8px; }
 
 .day-hearing-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
 .day-hearing-item {

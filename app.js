@@ -93,14 +93,13 @@ function startCasesListener() {
 }
 
 /* ---------------- Tabs ---------------- */
+function switchTab(tabName) {
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabName));
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + tabName));
+  renderAll();
+}
 document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
-    renderAll();
-  });
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
 function renderAll() {
@@ -108,6 +107,8 @@ function renderAll() {
   renderCalendar();
   renderResponseTab();
   updateResponseBadge();
+  renderClosedTab();
+  updateClosedBadge();
 }
 
 /* ---------------- Derived helpers ---------------- */
@@ -141,15 +142,23 @@ function hasHearingWithinDays(kase, days) {
 }
 function hearingTypeLabel(t) { return t === "pleading" ? "변론기일" : "재판기일"; }
 
-/* All hearings flattened, each carrying parent case ref */
+/* All hearings flattened, each carrying parent case ref. 종결된 사건은 제외. */
 function allHearingsFlat() {
   const out = [];
   for (const kase of cases) {
+    if (kase.closed) continue;
     for (const h of (kase.hearings || [])) {
       out.push({ ...h, case: kase });
     }
   }
   return out;
+}
+
+function formatTimestampKorDate(ts) {
+  if (!ts) return "-";
+  const d = typeof ts.toDate === "function" ? ts.toDate() : new Date(ts);
+  if (isNaN(d.getTime())) return "-";
+  return formatKorDate(toDateStr(d));
 }
 
 /* ---------------- Case table (사건 총집합) ---------------- */
@@ -204,7 +213,7 @@ function sortValueFor(kase, key) {
 function renderCaseTable() {
   const q = caseSearch.value.trim().toLowerCase();
 
-  let filtered = cases.filter((k) => {
+  let filtered = cases.filter((k) => !k.closed).filter((k) => {
     if (!q) return true;
     return [k.caseNumber, k.clientName, k.caseName].some((v) => (v || "").toLowerCase().includes(q));
   });
@@ -254,9 +263,13 @@ function renderCaseTable() {
       <td>${trial ? formatKorDate(trial.date) : "-"}</td>
       <td>${kase.clientRole === "victim" ? stats.total : "-"}</td>
       <td>${kase.clientRole === "victim" ? `<span class="badge ${stats.needsResponse ? "badge-incomplete" : "badge-complete"}">${stats.responded}/${stats.total}</span>` : "-"}</td>
-      <td><button class="btn btn-sm row-open-btn">열기</button></td>
+      <td>
+        <button class="btn btn-sm row-open-btn">열기</button>
+        <button class="btn btn-sm btn-warning row-close-btn">종결</button>
+      </td>
     `;
     tr.querySelector(".row-open-btn").addEventListener("click", (e) => { e.stopPropagation(); openCaseModal(kase.id); });
+    tr.querySelector(".row-close-btn").addEventListener("click", (e) => { e.stopPropagation(); closeCase(kase.id); });
     tr.addEventListener("click", () => openCaseModal(kase.id));
     caseTableBody.appendChild(tr);
   }
@@ -329,6 +342,7 @@ const caseModal = document.getElementById("case-modal");
 const caseForm = document.getElementById("case-form");
 const caseModalTitle = document.getElementById("case-modal-title");
 const deleteCaseBtn = document.getElementById("delete-case-btn");
+const closeCaseBtn = document.getElementById("close-case-btn");
 const defendantListEl = document.getElementById("defendant-list");
 const hearingListEl = document.getElementById("hearing-list");
 const fCategory = document.getElementById("f-category");
@@ -371,6 +385,7 @@ function openCaseModal(caseId) {
   document.getElementById("case-id").value = caseId || "";
   caseModalTitle.textContent = kase ? "사건 수정" : "새 사건 등록";
   deleteCaseBtn.hidden = !kase;
+  closeCaseBtn.hidden = !kase || !!kase.closed;
 
   if (kase) {
     document.getElementById("f-caseNumber").value = kase.caseNumber || "";
@@ -508,6 +523,59 @@ deleteCaseBtn.addEventListener("click", async () => {
   }
 });
 
+closeCaseBtn.addEventListener("click", async () => {
+  const id = document.getElementById("case-id").value;
+  if (!id) return;
+  const ok = await closeCase(id);
+  if (ok) closeModal("case-modal");
+});
+
+/* ---------------- 종결 처리 ---------------- */
+/* 종결: 삭제가 아니라 상태만 바꿔서 "종결" 탭으로 옮김. 언제든 "다시 열기"로 복구 가능.
+   영구종결: 실제로 Firestore 문서를 삭제해 서버(Firestore) 저장 용량/문서 수를 줄임. */
+async function closeCase(caseId) {
+  if (!confirm("이 사건을 종결 처리하시겠습니까?\n\"종결\" 탭으로 이동되며, 사건 총집합/캘린더/대응 필요 목록에서는 더 이상 보이지 않습니다.")) return false;
+  try {
+    await updateDoc(doc(db, "cases", caseId), { closed: true, closedAt: serverTimestamp() });
+    switchTab("closed");
+    return true;
+  } catch (err) {
+    alert("종결 처리 중 오류: " + err.message);
+    return false;
+  }
+}
+
+async function reopenCase(caseId) {
+  if (!confirm("이 사건을 다시 진행 중 상태로 되돌리시겠습니까?")) return;
+  try {
+    await updateDoc(doc(db, "cases", caseId), { closed: false, closedAt: null });
+  } catch (err) {
+    alert("처리 중 오류: " + err.message);
+  }
+}
+
+async function permanentlyDeleteCase(caseId) {
+  if (!confirm("이 사건을 영구 삭제하시겠습니까?\n서버(Firestore)에서 완전히 삭제되어 되돌릴 수 없습니다. 필요하면 먼저 백업하세요.")) return;
+  try {
+    await deleteDoc(doc(db, "cases", caseId));
+  } catch (err) {
+    alert("삭제 중 오류: " + err.message);
+  }
+}
+
+async function permanentlyDeleteAllClosed() {
+  const list = cases.filter((k) => k.closed);
+  if (!list.length) { alert("영구 삭제할 종결된 사건이 없습니다."); return; }
+  if (!confirm(`종결된 사건 ${list.length}건을 모두 영구 삭제하시겠습니까?\n서버(Firestore)에서 완전히 삭제되어 되돌릴 수 없습니다. 필요하면 먼저 백업하세요.`)) return;
+  if (!confirm("정말 진행할까요? 마지막 확인입니다. 이 작업은 취소할 수 없습니다.")) return;
+  try {
+    await Promise.all(list.map((k) => deleteDoc(doc(db, "cases", k.id))));
+  } catch (err) {
+    alert("일괄 삭제 중 오류: " + err.message);
+  }
+}
+document.getElementById("bulk-delete-closed-btn").addEventListener("click", permanentlyDeleteAllClosed);
+
 /* ---------------- Modal generic close ---------------- */
 document.querySelectorAll("[data-close]").forEach((el) => {
   el.addEventListener("click", () => closeModal(el.dataset.close));
@@ -638,7 +706,7 @@ function openDayModal(dateStr) {
   }
 
   dayCaseSelect.innerHTML = cases
-    .slice()
+    .filter((k) => !k.closed)
     .sort((a, b) => (a.caseNumber || "").localeCompare(b.caseNumber || ""))
     .map((k) => `<option value="${k.id}">${escapeHtml(k.caseNumber || "")} · ${escapeHtml(k.caseName || "")}</option>`)
     .join("");
@@ -673,7 +741,7 @@ const responseCountBadge = document.getElementById("response-count-badge");
    피해자 사건이 아니면(= 상대방 대응 추적 대상이 아니면) 애초에 제외됨. */
 function casesNeedingResponse() {
   return cases
-    .filter((k) => k.clientRole === "victim")
+    .filter((k) => !k.closed && k.clientRole === "victim")
     .map((k) => ({ case: k, stats: defendantStats(k), nh: nextHearing(k) }))
     .filter((x) => x.stats.needsResponse)
     .sort((a, b) => {
@@ -708,4 +776,47 @@ function updateResponseBadge() {
   const count = casesNeedingResponse().length;
   responseCountBadge.hidden = count === 0;
   responseCountBadge.textContent = count;
+}
+
+/* ---------------- 종결 탭 ---------------- */
+const closedTableBody = document.getElementById("closed-table-body");
+const closedEmpty = document.getElementById("closed-empty");
+const closedCountBadge = document.getElementById("closed-count-badge");
+
+function closedCasesSorted() {
+  return cases.filter((k) => k.closed).sort((a, b) => {
+    const ad = a.closedAt && typeof a.closedAt.toDate === "function" ? a.closedAt.toDate().getTime() : 0;
+    const bd = b.closedAt && typeof b.closedAt.toDate === "function" ? b.closedAt.toDate().getTime() : 0;
+    return bd - ad; // 최근 종결된 순
+  });
+}
+
+function renderClosedTab() {
+  const list = closedCasesSorted();
+  closedTableBody.innerHTML = "";
+  closedEmpty.hidden = list.length > 0;
+
+  for (const kase of list) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(kase.caseNumber || "")}</td>
+      <td>${escapeHtml(kase.caseName || "")}</td>
+      <td>${escapeHtml(kase.clientName || "")}</td>
+      <td><span class="badge ${kase.caseKind === "criminal" ? "badge-criminal" : "badge-civil"}">${kase.caseKind === "criminal" ? "형사" : "민사"}</span></td>
+      <td>${formatTimestampKorDate(kase.closedAt)}</td>
+      <td>
+        <button type="button" class="btn btn-sm reopen-btn">다시 열기</button>
+        <button type="button" class="btn btn-sm btn-danger permanent-delete-btn">영구종결</button>
+      </td>
+    `;
+    tr.querySelector(".reopen-btn").addEventListener("click", () => reopenCase(kase.id));
+    tr.querySelector(".permanent-delete-btn").addEventListener("click", () => permanentlyDeleteCase(kase.id));
+    closedTableBody.appendChild(tr);
+  }
+}
+
+function updateClosedBadge() {
+  const count = closedCasesSorted().length;
+  closedCountBadge.hidden = count === 0;
+  closedCountBadge.textContent = count;
 }

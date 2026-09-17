@@ -35,6 +35,7 @@
       <button class="tab-btn active" data-tab="cases">사건 총집합</button>
       <button class="tab-btn" data-tab="calendar">캘린더</button>
       <button class="tab-btn" data-tab="response">대응 필요 <span id="response-count-badge" class="count-badge" hidden>0</span></button>
+      <button class="tab-btn" data-tab="closed">종결 <span id="closed-count-badge" class="count-badge" hidden>0</span></button>
     </nav>
     <div class="header-right">
       <span id="user-email" class="user-email"></span>
@@ -113,6 +114,31 @@
       </div>
       <div id="response-list" class="response-list"></div>
       <p id="response-empty" class="empty-msg" hidden>대응이 필요한 사건이 없습니다.</p>
+    </section>
+
+    <!-- 종결 탭 -->
+    <section id="tab-closed" class="tab-panel">
+      <div class="panel-toolbar">
+        <h2>종결된 사건</h2>
+        <button type="button" id="bulk-delete-closed-btn" class="btn btn-danger">🗑 전체 영구종결(일괄 삭제)</button>
+      </div>
+      <p class="form-hint">"종결" 처리한 사건이 여기 모입니다. 잘못 종결했다면 "다시 열기"로 되돌릴 수 있고, "영구종결"을 누르면 서버에서 완전히 삭제되어 되돌릴 수 없습니다. 삭제 전 사건 총집합 탭의 백업 버튼으로 미리 백업해두는 것을 권장합니다.</p>
+      <div class="table-wrap">
+        <table class="case-table">
+          <thead>
+            <tr>
+              <th>사건번호</th>
+              <th>사건명</th>
+              <th>의뢰인</th>
+              <th>구분</th>
+              <th>종결일</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="closed-table-body"></tbody>
+        </table>
+        <p id="closed-empty" class="empty-msg" hidden>종결된 사건이 없습니다.</p>
+      </div>
     </section>
 
   </main>
@@ -233,7 +259,10 @@
       </div>
 
       <div class="modal-footer">
-        <button type="button" id="delete-case-btn" class="btn btn-danger" hidden>사건 삭제</button>
+        <div class="footer-left">
+          <button type="button" id="delete-case-btn" class="btn btn-danger" hidden>사건 삭제</button>
+          <button type="button" id="close-case-btn" class="btn btn-warning" hidden>사건 종결</button>
+        </div>
         <div class="footer-right">
           <button type="button" class="btn btn-ghost" data-close="case-modal">취소</button>
           <button type="submit" class="btn btn-primary">저장</button>
