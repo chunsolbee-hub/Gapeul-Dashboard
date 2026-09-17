@@ -88,8 +88,8 @@
       </div>
       <p class="calendar-legend">
         <span class="legend-item"><span class="dot dot-upcoming"></span>4주 이내 예정</span>
-        <span class="legend-item"><span class="dot dot-incomplete"></span>대응 미완료</span>
-        <span class="legend-item"><span class="dot dot-complete"></span>대응 완료</span>
+        <span class="legend-item"><span class="dot dot-incomplete"></span>상대방 대응 있음 (대응 필요)</span>
+        <span class="legend-item"><span class="dot dot-complete"></span>상대방 대응 없음</span>
       </p>
       <div id="calendar-grid" class="calendar-grid"></div>
     </section>
@@ -98,13 +98,10 @@
     <section id="tab-response" class="tab-panel">
       <div class="panel-toolbar">
         <h2>대응 필요</h2>
-        <label class="checkbox-label">
-          <input type="checkbox" id="response-show-all" />
-          4주 이후 일정도 모두 보기
-        </label>
+        <span class="form-hint" style="margin:0;">상대방(피고) 중 한 명이라도 대응해 온 사건이 아래에 자동으로 표시됩니다.</span>
       </div>
       <div id="response-list" class="response-list"></div>
-      <p id="response-empty" class="empty-msg" hidden>대응이 필요한 기일이 없습니다.</p>
+      <p id="response-empty" class="empty-msg" hidden>대응이 필요한 사건이 없습니다.</p>
     </section>
 
   </main>
@@ -196,12 +193,12 @@
         </label>
       </div>
 
-      <div class="form-section">
+      <div class="form-section" id="defendant-section">
         <div class="form-section-header">
-          <h4>피고인 목록</h4>
-          <button type="button" id="add-defendant-btn" class="btn btn-sm">+ 피고인 추가</button>
+          <h4>상대방(피고) 목록</h4>
+          <button type="button" id="add-defendant-btn" class="btn btn-sm">+ 피고 추가</button>
         </div>
-        <p class="form-hint">각 피고인의 대응(답변/의견서 등) 완료 여부를 체크하세요. 대응현황은 자동으로 계산됩니다.</p>
+        <p class="form-hint">의뢰인이 <b>피해자</b>인 사건에서만 표시됩니다. 상대방(피고)이 우리 측에 대응(답변/연락 등)해 오면 체크하세요. 한 명이라도 대응하면 이 사건은 자동으로 "대응 필요" 탭에 표시됩니다.</p>
         <div id="defendant-list" class="defendant-list"></div>
       </div>
 
