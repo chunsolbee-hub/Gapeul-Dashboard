@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// 로그인(인증)된 사용자만 사건 데이터를 읽고 쓸 수 있도록 제한합니다.
+// Firebase 콘솔 > Firestore Database > 규칙(Rules) 탭에 이 내용을 붙여넣고 "게시(Publish)"하세요.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /cases/{caseId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
