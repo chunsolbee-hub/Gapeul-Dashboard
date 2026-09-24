@@ -157,22 +157,31 @@ function renderAll() {
   updateClosedBadge();
 }
 
-/* ---------------- 상태 자동분류 ---------------- */
-function computeAutoStatusFromParts({ kind, subCases, hearings, criminalProgress }) {
-  const hasSubCase = (subCases || []).some((s) => (s.caseNumber || "").trim());
-  const sortedHearings = (hearings || []).filter((h) => h.date).slice().sort((a, b) => a.date.localeCompare(b.date));
-  const today = todayStr();
-  const lastHearing = sortedHearings[sortedHearings.length - 1];
+/* ---------------- 상태 자동분류 ----------------
+   1) 미접수: 사건번호(사건수)가 없거나, 접수서류 건수가 사건수보다 적으면(=아직 다 접수 안 됨) 무조건 미접수.
+   2) 접수사건: 접수서류 건수가 사건수 이상으로 맞춰지면 접수사건.
+   3) 진행사건: 접수사건 상태에서 기일/제출서류/상대방 제출서류 중 하나라도 등록되면 진행사건.
+   4) 완료사건: 그중 선고기일 종류의 기일이 등록되어 있고, 그 날짜가 오늘보다 이전이면 완료사건.
+   (구분·형사 진행현황은 표시용일 뿐 자동분류 계산에는 관여하지 않습니다.) */
+function computeAutoStatusFromParts({ subCases, filings, hearings, ourFilings, oppFilings }) {
+  const subCaseCount = (subCases || []).filter((s) => (s.caseNumber || "").trim()).length;
+  const filingCount = (filings || []).length;
 
-  if (kind && kind.criminal && (criminalProgress === "불기소" || criminalProgress === "불송치")) return "completed";
-  if (lastHearing && lastHearing.type === "선고기일" && lastHearing.date <= today) return "completed";
-  if (sortedHearings.length > 0) return "inprogress";
-  if (hasSubCase) return "filed";
-  return "unfiled";
+  if (subCaseCount === 0 || filingCount < subCaseCount) return "unfiled";
+
+  const hasProgressSignal = (hearings && hearings.length > 0) || (ourFilings && ourFilings.length > 0) || (oppFilings && oppFilings.length > 0);
+  if (!hasProgressSignal) return "filed";
+
+  const today = todayStr();
+  const hasPastVerdict = (hearings || []).some((h) => h.type === "선고기일" && h.date && h.date < today);
+  if (hasPastVerdict) return "completed";
+
+  return "inprogress";
 }
 function computeAutoStatus(m) {
   return computeAutoStatusFromParts({
-    kind: m.kind || {}, subCases: m.subCases || [], hearings: m.hearings || [], criminalProgress: m.criminalProgress || ""
+    subCases: m.subCases || [], filings: m.filings || [], hearings: m.hearings || [],
+    ourFilings: m.ourFilings || [], oppFilings: m.oppFilings || []
   });
 }
 function effectiveStatus(m) {
@@ -288,7 +297,7 @@ function renderCaseTable() {
       <td>${stackCell(sortedCorrections, (c) => {
         const diff = c.deadline ? daysBetween(todayStr(), c.deadline) : null;
         let cls = "badge-dday-neutral", text = "";
-        if (c.submittedDate) { cls = "badge-dday-done"; text = "제출완료"; }
+        if (c.submitted || c.submittedDate) { cls = "badge-dday-done"; text = "제출완료"; }
         else if (diff !== null) {
           cls = diff < 0 ? "badge-dday-danger" : diff <= 3 ? "badge-dday-warning" : "badge-dday-neutral";
           text = diff === 0 ? "D-DAY" : diff > 0 ? `D-${diff}` : `D+${-diff}`;
@@ -348,7 +357,7 @@ function exportCasesCSV() {
       joinList(m.respondents, (r) => r.name),
       m.lawyer || "",
       joinList(m.filings, (f) => `${f.date || ""} ${docLabel(f)}`),
-      joinList(m.corrections, (c) => `${c.name || ""}(송달:${c.date || "-"},마감:${c.deadline || "-"}${c.submittedDate ? ",제출:" + c.submittedDate : ""})`),
+      joinList(m.corrections, (c) => `${c.name || ""}(송달:${c.date || "-"},마감:${c.deadline || "-"}${c.submittedDate ? ",제출:" + c.submittedDate : ""}${(c.submitted || c.submittedDate) ? ",제출완료" : ""})`),
       joinList(m.hearings, (h) => `${h.date || ""} ${h.time || ""} ${h.type || ""}`),
       joinList(m.ourFilings, (f) => `${f.date || ""} ${docLabel(f)}`),
       joinList(m.oppFilings, (f) => `${f.date || ""} ${docLabel(f)}${f.submitter ? "(" + f.submitter + ")" : ""}`),
@@ -423,10 +432,11 @@ fCriminalProgress.addEventListener("change", refreshStatusBadge);
 /* ---- 상태 자동/수동 ---- */
 function currentDraftParts() {
   return {
-    kind: collectKind(),
     subCases: collectSubcases(),
+    filings: collectFilings(),
     hearings: collectHearings(),
-    criminalProgress: fCriminalProgress.value
+    ourFilings: collectOurFilings(),
+    oppFilings: collectOppFilings()
   };
 }
 function refreshStatusBadge() {
@@ -549,8 +559,10 @@ function collectRespondents() {
 
 /* ---- 접수서류 (filings) ---- */
 document.getElementById("add-filing-btn").addEventListener("click", () => addFilingRow());
+filingListEl.addEventListener("input", refreshStatusBadge);
 filingListEl.addEventListener("change", (e) => {
   if (e.target.matches('[data-field="type"]')) toggleOtherNote(e.target.closest(".subrow"));
+  refreshStatusBadge();
 });
 function addFilingRow(f = {}) {
   appendSubrow(filingListEl, `
@@ -581,31 +593,36 @@ function docLabel(entry) {
 
 /* ---- 보정명령 (corrections, D-day) ---- */
 document.getElementById("add-correction-btn").addEventListener("click", () => addCorrectionRow());
-correctionListEl.addEventListener("input", (e) => {
+function handleCorrectionFieldChange(e) {
   const row = e.target.closest(".subrow");
-  if (row) updateCorrectionRowDday(row);
+  if (!row) return;
+  // 제출일을 입력하면 "제출완료" 체크박스를 자동으로 켜줍니다 (날짜 없이 체크박스만 직접 켤 수도 있습니다).
+  if (e.target.matches('[data-field="submittedDate"]') && e.target.value) {
+    const cb = row.querySelector('[data-field="submitted"]');
+    if (cb) cb.checked = true;
+  }
+  updateCorrectionRowDday(row);
   refreshStatusBadge();
-});
-correctionListEl.addEventListener("change", (e) => {
-  const row = e.target.closest(".subrow");
-  if (row) updateCorrectionRowDday(row);
-});
+}
+correctionListEl.addEventListener("input", handleCorrectionFieldChange);
+correctionListEl.addEventListener("change", handleCorrectionFieldChange);
 function addCorrectionRow(c = {}) {
   const row = appendSubrow(correctionListEl, `
     <label class="subrow-field"><span class="subrow-field-label">내용</span><input type="text" data-field="name" placeholder="보정명령 내용" value="${escapeHtml(c.name || "")}" /></label>
     <label class="subrow-field"><span class="subrow-field-label">송달일</span><input type="date" data-field="date" value="${c.date || ""}" /></label>
     <label class="subrow-field"><span class="subrow-field-label">마감일</span><input type="date" data-field="deadline" value="${c.deadline || ""}" /></label>
     <label class="subrow-field"><span class="subrow-field-label">제출일</span><input type="date" data-field="submittedDate" value="${c.submittedDate || ""}" /></label>
+    <label class="subrow-checkbox-label"><input type="checkbox" data-field="submitted" ${c.submitted || c.submittedDate ? "checked" : ""} /> 제출완료</label>
     <span class="badge badge-dday" data-dday></span>
   `);
   updateCorrectionRowDday(row);
 }
 function updateCorrectionRowDday(row) {
   const deadline = fieldVal(row, "deadline");
-  const submittedDate = fieldVal(row, "submittedDate");
+  const submitted = fieldVal(row, "submitted") || !!fieldVal(row, "submittedDate");
   const badge = row.querySelector("[data-dday]");
   if (!badge) return;
-  if (submittedDate) { badge.textContent = "제출완료"; badge.className = "badge badge-dday badge-dday-done"; return; }
+  if (submitted) { badge.textContent = "제출완료"; badge.className = "badge badge-dday badge-dday-done"; return; }
   if (!deadline) { badge.textContent = ""; badge.className = "badge badge-dday"; return; }
   const diff = daysBetween(todayStr(), deadline);
   const cls = diff < 0 ? "badge-dday-danger" : diff <= 3 ? "badge-dday-warning" : "badge-dday-neutral";
@@ -619,10 +636,10 @@ function collectCorrections() {
       date: fieldVal(row, "date"),
       deadline: fieldVal(row, "deadline"),
       submittedDate: fieldVal(row, "submittedDate"),
-      name: fieldVal(row, "name"),
-      completed: !!fieldVal(row, "submittedDate")
+      submitted: !!fieldVal(row, "submitted") || !!fieldVal(row, "submittedDate"),
+      name: fieldVal(row, "name")
     }))
-    .filter((c) => c.date || c.deadline || c.submittedDate || c.name);
+    .filter((c) => c.date || c.deadline || c.submittedDate || c.submitted || c.name);
 }
 
 /* ---- 기일 (hearings) ---- */
@@ -655,8 +672,10 @@ function collectHearings() {
 
 /* ---- 제출서류 (우리 측, ourFilings) ---- */
 document.getElementById("add-ourfiling-btn").addEventListener("click", () => addOurFilingRow());
+ourfilingListEl.addEventListener("input", refreshStatusBadge);
 ourfilingListEl.addEventListener("change", (e) => {
   if (e.target.matches('[data-field="type"]')) toggleOtherNote(e.target.closest(".subrow"));
+  refreshStatusBadge();
 });
 function addOurFilingRow(f = {}) {
   appendSubrow(ourfilingListEl, `
@@ -675,8 +694,10 @@ function collectOurFilings() {
 
 /* ---- 상대방 제출서류 (oppFilings) ---- */
 document.getElementById("add-oppfiling-btn").addEventListener("click", () => addOppFilingRow());
+oppfilingListEl.addEventListener("input", refreshStatusBadge);
 oppfilingListEl.addEventListener("change", (e) => {
   if (e.target.matches('[data-field="type"]')) toggleOtherNote(e.target.closest(".subrow"));
+  refreshStatusBadge();
 });
 function addOppFilingRow(f = {}) {
   appendSubrow(oppfilingListEl, `
