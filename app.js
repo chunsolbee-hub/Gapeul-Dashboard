@@ -158,29 +158,39 @@ function renderAll() {
 }
 
 /* ---------------- 상태 자동분류 ----------------
+   [민사/가사/기타가 하나라도 섞인 경우 — 접수서류 기준 경로]
    1) 미접수: 사건번호(사건수)가 없거나, 접수서류 건수가 사건수보다 적으면(=아직 다 접수 안 됨) 무조건 미접수.
    2) 접수사건: 접수서류 건수가 사건수 이상으로 맞춰지면 접수사건.
    3) 진행사건: 접수사건 상태에서 기일/제출서류/상대방 제출서류 중 하나라도 등록되면 진행사건.
    4) 완료사건: 그중 선고기일 종류의 기일이 등록되어 있고, 그 날짜가 오늘보다 이전이면 완료사건.
-   (구분·형사 진행현황은 표시용일 뿐 자동분류 계산에는 관여하지 않습니다.) */
-function computeAutoStatusFromParts({ subCases, filings, hearings, ourFilings, oppFilings }) {
+
+   [형사만 단독으로 체크된 경우 — 접수서류 개념이 없으므로 별도 경로]
+   1) 미접수: 기일/제출서류/상대방 제출서류가 하나도 없으면 미접수.
+   2) 진행사건: 위 셋 중 하나라도 등록되면 바로 진행사건 (사건번호·접수서류 매칭 단계 생략).
+   3) 완료사건: 그중 선고기일이 등록되어 있고 날짜가 오늘보다 이전이면 완료사건.
+
+   (형사 진행현황은 표시용일 뿐 자동분류 계산에는 관여하지 않습니다.) */
+function computeAutoStatusFromParts({ kind, subCases, filings, hearings, ourFilings, oppFilings }) {
+  const today = todayStr();
+  const hasProgressSignal = (hearings && hearings.length > 0) || (ourFilings && ourFilings.length > 0) || (oppFilings && oppFilings.length > 0);
+  const hasPastVerdict = (hearings || []).some((h) => h.type === "선고기일" && h.date && h.date < today);
+
+  const isCriminalOnly = !!(kind && kind.criminal && !kind.civil && !kind.family && !kind.other);
+  if (isCriminalOnly) {
+    if (!hasProgressSignal) return "unfiled";
+    return hasPastVerdict ? "completed" : "inprogress";
+  }
+
   const subCaseCount = (subCases || []).filter((s) => (s.caseNumber || "").trim()).length;
   const filingCount = (filings || []).length;
 
   if (subCaseCount === 0 || filingCount < subCaseCount) return "unfiled";
-
-  const hasProgressSignal = (hearings && hearings.length > 0) || (ourFilings && ourFilings.length > 0) || (oppFilings && oppFilings.length > 0);
   if (!hasProgressSignal) return "filed";
-
-  const today = todayStr();
-  const hasPastVerdict = (hearings || []).some((h) => h.type === "선고기일" && h.date && h.date < today);
-  if (hasPastVerdict) return "completed";
-
-  return "inprogress";
+  return hasPastVerdict ? "completed" : "inprogress";
 }
 function computeAutoStatus(m) {
   return computeAutoStatusFromParts({
-    subCases: m.subCases || [], filings: m.filings || [], hearings: m.hearings || [],
+    kind: m.kind || {}, subCases: m.subCases || [], filings: m.filings || [], hearings: m.hearings || [],
     ourFilings: m.ourFilings || [], oppFilings: m.oppFilings || []
   });
 }
@@ -432,6 +442,7 @@ fCriminalProgress.addEventListener("change", refreshStatusBadge);
 /* ---- 상태 자동/수동 ---- */
 function currentDraftParts() {
   return {
+    kind: collectKind(),
     subCases: collectSubcases(),
     filings: collectFilings(),
     hearings: collectHearings(),
