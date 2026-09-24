@@ -942,6 +942,17 @@ function allHearingsFlat() {
   return out;
 }
 
+/* 기일 장소 입력값에 인터넷 주소가 포함되어 있으면 그 URL을 뽑아줍니다. "706호"처럼 법정 호실만
+   적혀 있는 경우는 null을 돌려주어 캘린더에 링크를 노출하지 않습니다. */
+function extractUrl(location) {
+  if (!location) return null;
+  const text = location.trim();
+  const withProtocol = text.match(/https?:\/\/[^\s]+/i);
+  if (withProtocol) return withProtocol[0].replace(/[),.]+$/, "");
+  const bareDomain = text.match(/^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+(?:\/[^\s]*)?$/i);
+  if (bareDomain) return "https://" + bareDomain[0];
+  return null;
+}
 function personNamesLabel(list) {
   if (!list || !list.length) return "-";
   const first = list[0].name;
@@ -993,11 +1004,13 @@ function renderCalendar() {
       const isVerdict = h.type === "선고기일";
       const caseNo = (m.subCases && m.subCases[0]) ? `${m.subCases[0].agency || ""} ${m.subCases[0].caseNumber || ""}`.trim() : "";
       const caseName = (m.subCases && m.subCases[0] && m.subCases[0].caseName) || "";
+      const url = extractUrl(h.location);
       const evEl = document.createElement("div");
       evEl.className = "cal-event" + (isVerdict ? " verdict" : "");
       evEl.innerHTML = `
         <span class="cal-event-case">${escapeHtml(caseName || caseNo || "사건")}</span>
         <span class="cal-event-sub">${escapeHtml(h.type || "기일")}${h.time ? " " + h.time : ""}</span>
+        ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="cal-event-link">🔗 영상재판 접속</a>` : ""}
       `;
       evEl.title = [
         caseNo,
@@ -1007,6 +1020,8 @@ function renderCalendar() {
         h.location ? `장소/링크: ${h.location}` : ""
       ].filter(Boolean).join("\n");
       evEl.addEventListener("click", (e) => { e.stopPropagation(); openCaseModal(m.id); });
+      const linkEl = evEl.querySelector(".cal-event-link");
+      if (linkEl) linkEl.addEventListener("click", (e) => e.stopPropagation());
       cell.appendChild(evEl);
     }
     if (events.length > LIMIT) {

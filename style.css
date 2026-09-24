@@ -366,6 +366,14 @@ input, select, textarea {
 .cal-event.verdict { background: var(--color-success-bg); color: var(--color-success); }
 .cal-event-case { display: block; font-weight: 800; }
 .cal-event-sub { display: block; font-weight: 500; opacity: 0.85; }
+.cal-event-link {
+  display: block;
+  margin-top: 3px;
+  color: #1d4ed8;
+  font-weight: 700;
+  text-decoration: underline;
+}
+.cal-event-link:hover { color: #1a3d99; }
 .cal-more { font-size: 11px; color: var(--color-text-muted); }
 
 /* ---------- Modal ---------- */
