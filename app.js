@@ -213,9 +213,10 @@ function kindLabelHtml(kind, criminalProgress) {
   if (!parts.length) return `<span class="cell-empty">-</span>`;
   return `<div class="cell-stack">${parts.join("")}</div>`;
 }
-function firstPersonName(m) {
-  return (m.plaintiffs && m.plaintiffs[0] && m.plaintiffs[0].name) ||
-         (m.respondents && m.respondents[0] && m.respondents[0].name) || "";
+/* 기본 정렬 기준: 의뢰인(빨간 칩)으로 지정된 칸의 첫 번째(처음 등록된) 이름, 가나다순. */
+function firstClientName(m) {
+  const list = clientPeople(m);
+  return (list && list[0] && list[0].name) || "";
 }
 /* 원고/피해자·피고/피고인 칸은 각각 "의뢰인" 또는 "상대방"으로 통째로 지정됩니다
    (칸 안의 개별 인원마다 구분하지 않음). 아래 두 함수는 그 지정에 따라 의뢰인 쪽/상대방 쪽
@@ -254,6 +255,8 @@ const caseSearch = document.getElementById("case-search");
 const caseSubtabsEl = document.getElementById("case-subtabs");
 
 let caseSubtab = "all";
+/* key: null(기본, 의뢰인 이름순) | "plaintiffs"(원고/피해자 열) | "respondents"(피고/피고인 열) */
+let caseSort = { key: null, dir: "asc" };
 
 caseSearch.addEventListener("input", renderCaseTable);
 
@@ -264,6 +267,31 @@ caseSubtabsEl.addEventListener("click", (e) => {
   caseSubtabsEl.querySelectorAll(".subtab-btn").forEach((b) => b.classList.toggle("active", b === btn));
   renderCaseTable();
 });
+
+document.querySelectorAll(".matters-table th.sortable").forEach((th) => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.sort;
+    if (caseSort.key === key) {
+      caseSort.dir = caseSort.dir === "asc" ? "desc" : "asc";
+    } else {
+      caseSort = { key, dir: "asc" };
+    }
+    renderCaseTable();
+  });
+});
+function updateSortHeaderUI() {
+  document.querySelectorAll(".matters-table th.sortable").forEach((th) => {
+    th.classList.remove("sort-asc", "sort-desc");
+    if (th.dataset.sort === caseSort.key) {
+      th.classList.add(caseSort.dir === "asc" ? "sort-asc" : "sort-desc");
+    }
+  });
+}
+function sortValueFor(m, key) {
+  if (key === "plaintiffs") return (m.plaintiffs && m.plaintiffs[0] && m.plaintiffs[0].name) || "";
+  if (key === "respondents") return (m.respondents && m.respondents[0] && m.respondents[0].name) || "";
+  return "";
+}
 
 function filteredSortedMatters() {
   const q = caseSearch.value.trim().toLowerCase();
@@ -279,12 +307,25 @@ function filteredSortedMatters() {
       default: return true;
     }
   });
-  list.sort((a, b) => firstPersonName(a).localeCompare(firstPersonName(b), "ko"));
+  if (caseSort.key) {
+    const dir = caseSort.dir === "desc" ? -1 : 1;
+    list.sort((a, b) => {
+      const av = sortValueFor(a, caseSort.key);
+      const bv = sortValueFor(b, caseSort.key);
+      if (!av && bv) return 1;   // 빈 값은 항상 뒤로
+      if (av && !bv) return -1;
+      return av.localeCompare(bv, "ko") * dir;
+    });
+  } else {
+    // 기본: 의뢰인(빨간 칩) 이름 가나다순 (다수인 경우 처음 등록된 이름 기준)
+    list.sort((a, b) => firstClientName(a).localeCompare(firstClientName(b), "ko"));
+  }
   return list;
 }
 
 function renderCaseTable() {
   const filtered = filteredSortedMatters();
+  updateSortHeaderUI();
   caseTableBody.innerHTML = "";
   caseEmpty.hidden = filtered.length > 0;
 
@@ -351,7 +392,7 @@ function joinList(items, fn) { return (items || []).map(fn).join("; "); }
 function exportCasesCSV() {
   const headers = ["번호", "상태", "구분", "사건번호", "원고/피해자", "피고/피고인", "담당변호사", "접수서류", "보정명령", "기일", "제출서류", "상대방 제출서류", "메모"];
   const rows = [headers];
-  const sorted = matters.slice().sort((a, b) => firstPersonName(a).localeCompare(firstPersonName(b), "ko"));
+  const sorted = matters.slice().sort((a, b) => firstClientName(a).localeCompare(firstClientName(b), "ko"));
   for (const m of sorted) {
     const kindParts = [];
     if (m.kind?.civil) kindParts.push("민사");
@@ -1046,6 +1087,34 @@ function closedCasesSorted() {
     return bd - ad; // 최근 종결된 순
   });
 }
+
+/* ---------------- 종결 탭 전용 백업 (CSV) ---------------- */
+function exportClosedCasesCSV() {
+  const list = closedCasesSorted();
+  if (!list.length) { alert("다운로드할 종결된 사건이 없습니다."); return; }
+  const headers = ["사건번호", "원고/피해자", "피고/피고인", "구분", "담당변호사", "종결일"];
+  const rows = [headers];
+  for (const m of list) {
+    const caseNoLabel = (m.subCases || []).map((s) => `${s.agency || ""} ${s.caseNumber || ""}`.trim()).filter(Boolean).join("; ");
+    const kindParts = [];
+    if (m.kind?.civil) kindParts.push("민사");
+    if (m.kind?.criminal) kindParts.push("형사" + (m.criminalProgress ? `(${m.criminalProgress})` : ""));
+    if (m.kind?.family) kindParts.push("가사");
+    if (m.kind?.other) kindParts.push(m.kind.otherText || "기타");
+    rows.push([
+      caseNoLabel,
+      joinList(m.plaintiffs, (p) => p.name),
+      joinList(m.respondents, (r) => r.name),
+      kindParts.join("/"),
+      m.lawyer || "",
+      formatTimestampKorDate(m.closedAt)
+    ]);
+  }
+  const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\r\n");
+  const bom = "﻿"; // 엑셀에서 한글 깨짐 방지
+  downloadFile(`종결사건_백업_${todayStr()}.csv`, bom + csv, "text/csv;charset=utf-8;");
+}
+document.getElementById("export-closed-csv-btn").addEventListener("click", exportClosedCasesCSV);
 
 function renderClosedTab() {
   const list = closedCasesSorted();

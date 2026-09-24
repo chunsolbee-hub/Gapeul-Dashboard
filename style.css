@@ -251,6 +251,12 @@ input, select, textarea {
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
 }
+.case-table th.sortable { cursor: pointer; user-select: none; }
+.case-table th.sortable:hover { color: var(--color-text); }
+.sort-arrow { display: inline-block; width: 10px; margin-left: 2px; font-size: 10px; }
+.sort-arrow::after { content: ""; }
+.case-table th.sort-asc .sort-arrow::after { content: "▲"; }
+.case-table th.sort-desc .sort-arrow::after { content: "▼"; }
 .case-table td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--color-border);

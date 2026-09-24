@@ -80,8 +80,8 @@
               <th>상태</th>
               <th>구분</th>
               <th>사건번호</th>
-              <th>원고/피해자</th>
-              <th>피고/피고인</th>
+              <th class="sortable" data-sort="plaintiffs">원고/피해자<span class="sort-arrow"></span></th>
+              <th class="sortable" data-sort="respondents">피고/피고인<span class="sort-arrow"></span></th>
               <th>담당변호사</th>
               <th>접수서류</th>
               <th>보정명령</th>
@@ -119,9 +119,12 @@
     <section id="tab-closed" class="tab-panel">
       <div class="panel-toolbar">
         <h2>종결된 사건</h2>
-        <button type="button" id="bulk-delete-closed-btn" class="btn btn-danger">🗑 전체 영구종결(일괄 삭제)</button>
+        <div class="toolbar-actions">
+          <button type="button" id="export-closed-csv-btn" class="btn btn-ghost">⬇ CSV 백업</button>
+          <button type="button" id="bulk-delete-closed-btn" class="btn btn-danger">🗑 전체 영구종결(일괄 삭제)</button>
+        </div>
       </div>
-      <p class="form-hint">"종결" 처리한 사건이 여기 모입니다. 잘못 종결했다면 "다시 열기"로 되돌릴 수 있고, "영구종결"을 누르면 서버에서 완전히 삭제되어 되돌릴 수 없습니다. 삭제 전 사건관리 탭의 백업 버튼으로 미리 백업해두는 것을 권장합니다.</p>
+      <p class="form-hint">"종결" 처리한 사건이 여기 모입니다. 잘못 종결했다면 "다시 열기"로 되돌릴 수 있고, "영구종결"을 누르면 서버에서 완전히 삭제되어 되돌릴 수 없습니다. 삭제 전 위 CSV 백업 버튼으로 미리 백업해두는 것을 권장합니다.</p>
       <div class="table-wrap">
         <table class="case-table">
           <thead>
