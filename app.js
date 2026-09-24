@@ -4,7 +4,7 @@ import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
+  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc,
   onSnapshot, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
@@ -12,38 +12,57 @@ import {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const casesCol = collection(db, "cases");
+const mattersCol = collection(db, "matters");
+const globalMemoRef = doc(db, "meta", "globalMemo");
 
 /* ---------------- State ---------------- */
-let cases = [];        // live cache of all case docs [{id, ...fields}]
-let unsubscribeCases = null;
+let matters = [];       // live cache of all matter docs [{id, ...fields}]
+let unsubscribeMatters = null;
+let unsubscribeMemo = null;
 let calState = (() => {
   const now = new Date();
   return { year: now.getFullYear(), month: now.getMonth() }; // month: 0-11
 })();
-let selectedDayDate = null; // 'YYYY-MM-DD' currently open in day-modal
 
-const CATEGORY_LABELS = {}; // not needed, using raw strings
+const HEARING_TYPES = ["변론기일", "선고기일", "조정기일", "심문기일", "기타"];
+const LAWYERS = ["대표님", "천솔비", "김도영"];
+
+const STATUS_LABEL = { unfiled: "미접수", filed: "접수사건", inprogress: "진행사건", completed: "완료사건" };
+const STATUS_ORDER = ["unfiled", "filed", "inprogress", "completed"];
 
 /* ---------------- Date helpers ---------------- */
 function pad(n) { return String(n).padStart(2, "0"); }
 function toDateStr(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
 function todayStr() { return toDateStr(new Date()); }
-function addDaysStr(dateStr, n) {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(y, m - 1, d + n);
-  return toDateStr(dt);
-}
-function fourWeeksFromToday() { return addDaysStr(todayStr(), 28); }
-function twoWeeksFromToday() { return addDaysStr(todayStr(), 14); }
 function formatKorDate(dateStr) {
   if (!dateStr) return "";
   const [y, m, d] = dateStr.split("-").map(Number);
+  if (!y || !m || !d) return dateStr;
   const wd = ["일", "월", "화", "수", "목", "금", "토"][new Date(y, m - 1, d).getDay()];
   return `${y}.${pad(m)}.${pad(d)} (${wd})`;
 }
+function formatTimestampKorDate(ts) {
+  if (!ts) return "-";
+  const d = typeof ts.toDate === "function" ? ts.toDate() : new Date(ts);
+  if (isNaN(d.getTime())) return "-";
+  return formatKorDate(toDateStr(d));
+}
+function daysBetween(aStr, bStr) {
+  const [ay, am, ad] = aStr.split("-").map(Number);
+  const [by, bm, bd] = bStr.split("-").map(Number);
+  const a = Date.UTC(ay, am - 1, ad);
+  const b = Date.UTC(by, bm - 1, bd);
+  return Math.round((b - a) / 86400000);
+}
 function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : "id-" + Math.random().toString(36).slice(2));
+}
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function timestampToISO(v) {
+  if (v && typeof v.toDate === "function") return v.toDate().toISOString();
+  return v || null;
 }
 
 /* ---------------- Auth ---------------- */
@@ -73,24 +92,51 @@ onAuthStateChanged(auth, (user) => {
     loginScreen.hidden = true;
     appRoot.hidden = false;
     userEmailEl.textContent = user.email || "";
-    startCasesListener();
+    startMattersListener();
+    startMemoListener();
   } else {
     loginScreen.hidden = false;
     appRoot.hidden = true;
-    if (unsubscribeCases) { unsubscribeCases(); unsubscribeCases = null; }
-    cases = [];
+    if (unsubscribeMatters) { unsubscribeMatters(); unsubscribeMatters = null; }
+    if (unsubscribeMemo) { unsubscribeMemo(); unsubscribeMemo = null; }
+    matters = [];
   }
 });
 
-function startCasesListener() {
-  if (unsubscribeCases) return;
-  unsubscribeCases = onSnapshot(casesCol, (snap) => {
-    cases = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+function startMattersListener() {
+  if (unsubscribeMatters) return;
+  unsubscribeMatters = onSnapshot(mattersCol, (snap) => {
+    matters = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderAll();
-  }, (err) => {
-    console.error("Firestore 구독 오류:", err);
-  });
+  }, (err) => console.error("Firestore 구독 오류:", err));
 }
+
+/* ---------------- Global pinned memo ---------------- */
+const globalMemoEl = document.getElementById("global-memo");
+let memoSaveTimer = null;
+let suppressMemoEcho = false;
+
+function startMemoListener() {
+  if (unsubscribeMemo) return;
+  unsubscribeMemo = onSnapshot(globalMemoRef, (snap) => {
+    if (suppressMemoEcho) return;
+    const text = snap.exists() ? (snap.data().text || "") : "";
+    if (document.activeElement !== globalMemoEl) globalMemoEl.value = text;
+  }, (err) => console.error("메모 구독 오류:", err));
+}
+globalMemoEl.addEventListener("input", () => {
+  clearTimeout(memoSaveTimer);
+  memoSaveTimer = setTimeout(async () => {
+    suppressMemoEcho = true;
+    try {
+      await setDoc(globalMemoRef, { text: globalMemoEl.value, updatedAt: serverTimestamp() }, { merge: true });
+    } catch (err) {
+      console.error("메모 저장 오류:", err);
+    } finally {
+      setTimeout(() => { suppressMemoEcho = false; }, 300);
+    }
+  }, 500);
+});
 
 /* ---------------- Tabs ---------------- */
 function switchTab(tabName) {
@@ -105,70 +151,73 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 function renderAll() {
   renderCaseTable();
   renderCalendar();
-  renderResponseTab();
-  updateResponseBadge();
   renderClosedTab();
   updateClosedBadge();
 }
 
-/* ---------------- Derived helpers ---------------- */
-/* 대응 의미: 상대방(피고)이 우리 측에 대응(답변/연락 등)해 오면 체크.
-   한 명이라도 대응하면 "우리가 그 상대방에게 대응해야" 하므로 needsResponse = true. */
-function defendantStats(kase) {
-  const list = kase.defendants || [];
-  const total = list.length;
-  const responded = list.filter((d) => d.responded).length;
-  const needsResponse = total > 0 && responded > 0;
-  return { total, responded, needsResponse, complete: !needsResponse };
-}
-function clientRoleLabel(kase) {
-  return kase.clientRole === "victim" ? "피해자" : "피의자";
-}
-function nextHearing(kase) {
-  const list = (kase.hearings || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+/* ---------------- 상태 자동분류 ---------------- */
+function computeAutoStatusFromParts({ kind, subCases, hearings, criminalProgress }) {
+  const hasSubCase = (subCases || []).some((s) => (s.caseNumber || "").trim());
+  const sortedHearings = (hearings || []).filter((h) => h.date).slice().sort((a, b) => a.date.localeCompare(b.date));
   const today = todayStr();
-  return list.find((h) => h.date >= today) || list[list.length - 1] || null;
-}
-/* type별(재판기일/변론기일) 가장 가까운 다가오는 기일. 없으면 가장 최근(과거) 기일. */
-function nextHearingByType(kase, type) {
-  const list = (kase.hearings || []).filter((h) => h.type === type).sort((a, b) => a.date.localeCompare(b.date));
-  const today = todayStr();
-  return list.find((h) => h.date >= today) || list[list.length - 1] || null;
-}
-function hasHearingWithinDays(kase, days) {
-  const today = todayStr();
-  const limit = addDaysStr(today, days);
-  return (kase.hearings || []).some((h) => h.date >= today && h.date <= limit);
-}
-function hearingTypeLabel(t) { return t === "pleading" ? "변론기일" : "재판기일"; }
+  const lastHearing = sortedHearings[sortedHearings.length - 1];
 
-/* All hearings flattened, each carrying parent case ref. 종결된 사건은 제외. */
-function allHearingsFlat() {
-  const out = [];
-  for (const kase of cases) {
-    if (kase.closed) continue;
-    for (const h of (kase.hearings || [])) {
-      out.push({ ...h, case: kase });
-    }
+  if (kind && kind.criminal && (criminalProgress === "불기소" || criminalProgress === "불송치")) return "completed";
+  if (lastHearing && lastHearing.type === "선고기일" && lastHearing.date <= today) return "completed";
+  if (sortedHearings.length > 0) return "inprogress";
+  if (hasSubCase) return "filed";
+  return "unfiled";
+}
+function computeAutoStatus(m) {
+  return computeAutoStatusFromParts({
+    kind: m.kind || {}, subCases: m.subCases || [], hearings: m.hearings || [], criminalProgress: m.criminalProgress || ""
+  });
+}
+function effectiveStatus(m) {
+  if (m.statusMode === "manual" && m.manualStatus) return m.manualStatus;
+  return computeAutoStatus(m);
+}
+
+/* ---------------- 표시용 도우미 ---------------- */
+function kindLabelHtml(kind) {
+  if (!kind) return `<span class="cell-empty">-</span>`;
+  const parts = [];
+  if (kind.civil) parts.push(`<span class="badge badge-civil">민사</span>`);
+  if (kind.criminal) {
+    const cp = kind.criminalProgress || "";
+    parts.push(`<span class="badge badge-criminal">형사</span>`);
   }
-  return out;
+  if (kind.family) parts.push(`<span class="badge badge-family">가사</span>`);
+  if (kind.other) parts.push(`<span class="badge badge-other-kind">${escapeHtml(kind.otherText || "기타")}</span>`);
+  if (!parts.length) return `<span class="cell-empty">-</span>`;
+  return `<div class="cell-stack">${parts.join("")}</div>`;
+}
+function firstPersonName(m) {
+  return (m.plaintiffs && m.plaintiffs[0] && m.plaintiffs[0].name) ||
+         (m.respondents && m.respondents[0] && m.respondents[0].name) || "";
+}
+function stackCell(items, renderFn, limit = 3) {
+  if (!items || !items.length) return `<span class="cell-empty">-</span>`;
+  const shown = items.slice(0, limit).map((it) => `<div class="cell-stack-item">${renderFn(it)}</div>`).join("");
+  const more = items.length > limit ? `<div class="cell-more">+${items.length - limit}건 더보기</div>` : "";
+  return `<div class="cell-stack">${shown}${more}</div>`;
+}
+function matchesSearch(m, q) {
+  if (!q) return true;
+  const haystacks = [];
+  (m.subCases || []).forEach((s) => haystacks.push(s.agency, s.caseNumber, s.caseName));
+  (m.plaintiffs || []).forEach((p) => haystacks.push(p.name));
+  (m.respondents || []).forEach((r) => haystacks.push(r.name));
+  return haystacks.some((v) => (v || "").toLowerCase().includes(q));
 }
 
-function formatTimestampKorDate(ts) {
-  if (!ts) return "-";
-  const d = typeof ts.toDate === "function" ? ts.toDate() : new Date(ts);
-  if (isNaN(d.getTime())) return "-";
-  return formatKorDate(toDateStr(d));
-}
-
-/* ---------------- Case table (사건 총집합) ---------------- */
+/* ---------------- 사건관리 탭 ---------------- */
 const caseTableBody = document.getElementById("case-table-body");
 const caseEmpty = document.getElementById("case-empty");
 const caseSearch = document.getElementById("case-search");
 const caseSubtabsEl = document.getElementById("case-subtabs");
 
-let caseSubtab = "all"; // all | civil | civil-soon | criminal | criminal-soon
-let caseSort = { key: null, dir: "asc" }; // key: caseName|clientName|retainedDate|pleadingDate|trialDate
+let caseSubtab = "all";
 
 caseSearch.addEventListener("input", renderCaseTable);
 
@@ -180,110 +229,72 @@ caseSubtabsEl.addEventListener("click", (e) => {
   renderCaseTable();
 });
 
-document.querySelectorAll(".case-table th.sortable").forEach((th) => {
-  th.addEventListener("click", () => {
-    const key = th.dataset.sort;
-    if (caseSort.key === key) {
-      caseSort.dir = caseSort.dir === "asc" ? "desc" : "asc";
-    } else {
-      caseSort = { key, dir: "asc" };
-    }
-    renderCaseTable();
-  });
-});
-
-function updateSortHeaderUI() {
-  document.querySelectorAll(".case-table th.sortable").forEach((th) => {
-    th.classList.remove("sort-asc", "sort-desc");
-    if (th.dataset.sort === caseSort.key) {
-      th.classList.add(caseSort.dir === "asc" ? "sort-asc" : "sort-desc");
-    }
-  });
-}
-
-function sortValueFor(kase, key) {
-  if (key === "caseName") return kase.caseName || "";
-  if (key === "clientName") return kase.clientName || "";
-  if (key === "retainedDate") return kase.retainedDate || "";
-  if (key === "pleadingDate") return (nextHearingByType(kase, "pleading") || {}).date || "";
-  if (key === "trialDate") return (nextHearingByType(kase, "trial") || {}).date || "";
-  return "";
-}
-
-function renderCaseTable() {
+function filteredSortedMatters() {
   const q = caseSearch.value.trim().toLowerCase();
-
-  let filtered = cases.filter((k) => !k.closed).filter((k) => {
-    if (!q) return true;
-    return [k.caseNumber, k.clientName, k.caseName].some((v) => (v || "").toLowerCase().includes(q));
-  });
-
-  filtered = filtered.filter((k) => {
+  let list = matters.filter((m) => !m.closed).filter((m) => matchesSearch(m, q));
+  list = list.filter((m) => {
     switch (caseSubtab) {
-      case "civil": return k.caseKind === "civil";
-      case "civil-soon": return k.caseKind === "civil" && hasHearingWithinDays(k, 14);
-      case "criminal": return k.caseKind === "criminal";
-      case "criminal-soon": return k.caseKind === "criminal" && hasHearingWithinDays(k, 14);
+      case "unfiled": return effectiveStatus(m) === "unfiled";
+      case "filed": return effectiveStatus(m) === "filed";
+      case "inprogress": return effectiveStatus(m) === "inprogress";
+      case "completed": return effectiveStatus(m) === "completed";
+      case "lawyer-천솔비": return m.lawyer === "천솔비";
+      case "lawyer-김도영": return m.lawyer === "김도영";
       default: return true;
     }
   });
+  list.sort((a, b) => firstPersonName(a).localeCompare(firstPersonName(b), "ko"));
+  return list;
+}
 
-  if (caseSort.key) {
-    const dir = caseSort.dir === "desc" ? -1 : 1;
-    filtered = filtered.slice().sort((a, b) => {
-      const av = sortValueFor(a, caseSort.key);
-      const bv = sortValueFor(b, caseSort.key);
-      if (!av && bv) return 1;   // 빈 값은 항상 뒤로
-      if (av && !bv) return -1;
-      return av.localeCompare(bv) * dir;
-    });
-  } else {
-    filtered = filtered.slice().sort((a, b) => (a.caseNumber || "").localeCompare(b.caseNumber || ""));
-  }
-
-  updateSortHeaderUI();
+function renderCaseTable() {
+  const filtered = filteredSortedMatters();
   caseTableBody.innerHTML = "";
   caseEmpty.hidden = filtered.length > 0;
 
-  for (const kase of filtered) {
-    const stats = defendantStats(kase);
-    const pleading = nextHearingByType(kase, "pleading");
-    const trial = nextHearingByType(kase, "trial");
+  filtered.forEach((m, idx) => {
+    const status = effectiveStatus(m);
+    const statusTag = m.statusMode === "manual" ? `<span class="status-manual-tag">(수동)</span>` : "";
+    const sortedHearings = (m.hearings || []).filter((h) => h.date).slice().sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+    const sortedCorrections = (m.corrections || []).slice().sort((a, b) => (a.deadline || "").localeCompare(b.deadline || ""));
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${escapeHtml(kase.caseNumber || "")}</td>
-      <td>${escapeHtml(kase.caseName || "")}</td>
-      <td>${escapeHtml(kase.clientName || "")}</td>
-      <td><span class="badge ${kase.caseKind === "criminal" ? "badge-criminal" : "badge-civil"}">${kase.caseKind === "criminal" ? "형사" : "민사"}</span></td>
-      <td>${clientRoleLabel(kase)}</td>
-      <td>${escapeHtml(kase.category || "")}</td>
-      <td>${escapeHtml(kase.court || "")}</td>
-      <td>${kase.retainedDate ? formatKorDate(kase.retainedDate) : "-"}</td>
-      <td>${pleading ? formatKorDate(pleading.date) : "-"}</td>
-      <td>${trial ? formatKorDate(trial.date) : "-"}</td>
-      <td>${kase.clientRole === "victim" ? stats.total : "-"}</td>
-      <td>${kase.clientRole === "victim" ? `<span class="badge ${stats.needsResponse ? "badge-incomplete" : "badge-complete"}">${stats.responded}/${stats.total}</span>` : "-"}</td>
-      <td>
+      <td class="nowrap">${idx + 1}</td>
+      <td class="nowrap"><span class="badge badge-status-${status}">${STATUS_LABEL[status]}</span>${statusTag}</td>
+      <td>${kindLabelHtml(m.kind)}</td>
+      <td>${stackCell(m.subCases, (s) => `<span title="${escapeHtml(s.caseName || "")}">${escapeHtml(s.agency || "")} ${escapeHtml(s.caseNumber || "")}</span>`)}</td>
+      <td>${stackCell(m.plaintiffs, (p) => `<span class="chip-person chip-plaintiff">${escapeHtml(p.name)}</span>`)}</td>
+      <td>${stackCell(m.respondents, (r) => `<span class="chip-person chip-respondent">${escapeHtml(r.name)}</span>`)}</td>
+      <td class="nowrap">${escapeHtml(m.lawyer || "-")}</td>
+      <td>${stackCell(m.filings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(f.name || "")}`)}</td>
+      <td>${stackCell(sortedCorrections, (c) => {
+        const diff = c.deadline ? daysBetween(todayStr(), c.deadline) : null;
+        let cls = "badge-dday-neutral", text = "";
+        if (c.completed) { cls = "badge-dday-done"; text = "완료"; }
+        else if (diff !== null) {
+          cls = diff < 0 ? "badge-dday-danger" : diff <= 3 ? "badge-dday-warning" : "badge-dday-neutral";
+          text = diff === 0 ? "D-DAY" : diff > 0 ? `D-${diff}` : `D+${-diff}`;
+        }
+        return `${escapeHtml(c.name || "보정명령")}${text ? ` <span class="badge badge-dday ${cls}">${text}</span>` : ""}`;
+      })}</td>
+      <td>${stackCell(sortedHearings, (h) => `<span class="badge ${h.type === "선고기일" ? "badge-hearing-verdict" : "badge-hearing-other"}">${escapeHtml(h.type || "기일")}</span> ${formatKorDate(h.date)}${h.time ? " " + h.time : ""}`)}</td>
+      <td>${stackCell(m.ourFilings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(f.name || "")}`)}</td>
+      <td>${stackCell(m.oppFilings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(f.name || "")}${f.submitter ? ` (${escapeHtml(f.submitter)})` : ""}`)}</td>
+      <td>${(m.notes && m.notes.length) ? escapeHtml((m.notes[m.notes.length - 1].text || "").slice(0, 30)) + (m.notes.length > 1 ? ` 외 ${m.notes.length - 1}건` : "") : `<span class="cell-empty">-</span>`}</td>
+      <td class="nowrap">
         <button class="btn btn-sm row-open-btn">열기</button>
         <button class="btn btn-sm btn-warning row-close-btn">종결</button>
       </td>
     `;
-    tr.querySelector(".row-open-btn").addEventListener("click", (e) => { e.stopPropagation(); openCaseModal(kase.id); });
-    tr.querySelector(".row-close-btn").addEventListener("click", (e) => { e.stopPropagation(); closeCase(kase.id); });
-    tr.addEventListener("click", () => openCaseModal(kase.id));
+    tr.querySelector(".row-open-btn").addEventListener("click", (e) => { e.stopPropagation(); openCaseModal(m.id); });
+    tr.querySelector(".row-close-btn").addEventListener("click", (e) => { e.stopPropagation(); closeCase(m.id); });
+    tr.addEventListener("click", () => openCaseModal(m.id));
     caseTableBody.appendChild(tr);
-  }
-}
-
-function escapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  });
 }
 
 /* ---------------- 백업 다운로드 (CSV / JSON) ---------------- */
-function timestampToISO(v) {
-  if (v && typeof v.toDate === "function") return v.toDate().toISOString();
-  return v || null;
-}
 function downloadFile(filename, content, mime) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -299,28 +310,32 @@ function csvEscape(v) {
   const s = String(v ?? "");
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
+function joinList(items, fn) { return (items || []).map(fn).join("; "); }
+
 function exportCasesCSV() {
-  const headers = ["사건번호", "사건명", "의뢰인", "구분", "의뢰인신분", "사건분류", "법원", "의뢰일자", "변론기일", "재판기일", "피고수", "대응(응답/전체)", "비고"];
+  const headers = ["번호", "상태", "구분", "사건번호", "원고/피해자", "피고/피고인", "담당변호사", "접수서류", "보정명령", "기일", "제출서류", "상대방 제출서류", "메모"];
   const rows = [headers];
-  const sorted = cases.slice().sort((a, b) => (a.caseNumber || "").localeCompare(b.caseNumber || ""));
-  for (const kase of sorted) {
-    const stats = defendantStats(kase);
-    const pleading = nextHearingByType(kase, "pleading");
-    const trial = nextHearingByType(kase, "trial");
+  const sorted = matters.slice().sort((a, b) => firstPersonName(a).localeCompare(firstPersonName(b), "ko"));
+  for (const m of sorted) {
+    const kindParts = [];
+    if (m.kind?.civil) kindParts.push("민사");
+    if (m.kind?.criminal) kindParts.push("형사" + (m.criminalProgress ? `(${m.criminalProgress})` : ""));
+    if (m.kind?.family) kindParts.push("가사");
+    if (m.kind?.other) kindParts.push(m.kind.otherText || "기타");
     rows.push([
-      kase.caseNumber || "",
-      kase.caseName || "",
-      kase.clientName || "",
-      kase.caseKind === "criminal" ? "형사" : "민사",
-      clientRoleLabel(kase),
-      kase.category || "",
-      kase.court || "",
-      kase.retainedDate || "",
-      pleading ? pleading.date : "",
-      trial ? trial.date : "",
-      kase.clientRole === "victim" ? stats.total : "",
-      kase.clientRole === "victim" ? `${stats.responded}/${stats.total}` : "",
-      kase.memo || ""
+      "", // 번호는 다운로드 시점의 표시 순서와 무관하므로 비움
+      m.closed ? "종결" : STATUS_LABEL[effectiveStatus(m)],
+      kindParts.join("/"),
+      joinList(m.subCases, (s) => `${s.agency || ""} ${s.caseNumber || ""}${s.caseName ? "(" + s.caseName + ")" : ""}`),
+      joinList(m.plaintiffs, (p) => p.name),
+      joinList(m.respondents, (r) => r.name),
+      m.lawyer || "",
+      joinList(m.filings, (f) => `${f.date || ""} ${f.name || ""}`),
+      joinList(m.corrections, (c) => `${c.name || ""}(기한:${c.deadline || "-"}${c.completed ? ",완료" : ""})`),
+      joinList(m.hearings, (h) => `${h.date || ""} ${h.time || ""} ${h.type || ""}`),
+      joinList(m.ourFilings, (f) => `${f.date || ""} ${f.name || ""}`),
+      joinList(m.oppFilings, (f) => `${f.date || ""} ${f.name || ""}${f.submitter ? "(" + f.submitter + ")" : ""}`),
+      joinList(m.notes, (n) => `${n.date || ""} ${n.text || ""}`)
     ]);
   }
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\r\n");
@@ -328,181 +343,392 @@ function exportCasesCSV() {
   downloadFile(`사건목록_백업_${todayStr()}.csv`, bom + csv, "text/csv;charset=utf-8;");
 }
 function exportCasesJSON() {
-  const data = cases.map((k) => {
-    const { id, createdAt, updatedAt, ...rest } = k;
-    return { id, ...rest, createdAt: timestampToISO(createdAt), updatedAt: timestampToISO(updatedAt) };
+  const data = matters.map((m) => {
+    const { id, createdAt, updatedAt, closedAt, ...rest } = m;
+    return { id, ...rest, createdAt: timestampToISO(createdAt), updatedAt: timestampToISO(updatedAt), closedAt: timestampToISO(closedAt) };
   });
   downloadFile(`사건목록_백업_${todayStr()}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8;");
 }
 document.getElementById("export-csv-btn").addEventListener("click", exportCasesCSV);
 document.getElementById("export-json-btn").addEventListener("click", exportCasesJSON);
 
-/* ---------------- Case modal ---------------- */
+/* ---------------- 사건 등록/편집 모달 ---------------- */
 const caseModal = document.getElementById("case-modal");
 const caseForm = document.getElementById("case-form");
 const caseModalTitle = document.getElementById("case-modal-title");
 const deleteCaseBtn = document.getElementById("delete-case-btn");
 const closeCaseBtn = document.getElementById("close-case-btn");
-const defendantListEl = document.getElementById("defendant-list");
+
+const statusBadgeEl = document.getElementById("status-badge");
+const fStatusManual = document.getElementById("f-status-manual");
+const statusOverrideBtn = document.getElementById("status-override-btn");
+const statusAutoBtn = document.getElementById("status-auto-btn");
+const statusAutoHint = document.getElementById("status-auto-hint");
+
+const fKindCivil = document.getElementById("f-kind-civil");
+const fKindCriminal = document.getElementById("f-kind-criminal");
+const fKindFamily = document.getElementById("f-kind-family");
+const fKindOther = document.getElementById("f-kind-other");
+const fKindOtherText = document.getElementById("f-kind-other-text");
+const criminalProgressRow = document.getElementById("criminal-progress-row");
+const fCriminalProgress = document.getElementById("f-criminal-progress");
+
+const fLawyer = document.getElementById("f-lawyer");
+
+const subcaseListEl = document.getElementById("subcase-list");
+const plaintiffListEl = document.getElementById("plaintiff-list");
+const respondentListEl = document.getElementById("respondent-list");
+const filingListEl = document.getElementById("filing-list");
+const correctionListEl = document.getElementById("correction-list");
 const hearingListEl = document.getElementById("hearing-list");
-const fCategory = document.getElementById("f-category");
-const fCategoryCustomRow = document.getElementById("category-custom-row");
-const fCategoryCustom = document.getElementById("f-category-custom");
-const fCourt = document.getElementById("f-court");
-const fCourtCustom = document.getElementById("f-court-custom");
-const fCaseKind = document.getElementById("f-caseKind");
-const fClientRole = document.getElementById("f-clientRole");
-const defendantSectionEl = document.getElementById("defendant-section");
-const fRetainedDate = document.getElementById("f-retainedDate");
-const fMemo = document.getElementById("f-memo");
+const ourfilingListEl = document.getElementById("ourfiling-list");
+const oppfilingListEl = document.getElementById("oppfiling-list");
+const noteListEl = document.getElementById("note-list");
+
+let modalStatusMode = "auto";
+let modalManualStatus = "unfiled";
 
 document.getElementById("new-case-btn").addEventListener("click", () => openCaseModal(null));
 
-fCategory.addEventListener("change", () => {
-  fCategoryCustomRow.hidden = fCategory.value !== "기타";
+/* ---- 구분 체크박스 ---- */
+function updateKindUI() {
+  fKindOtherText.hidden = !fKindOther.checked;
+  criminalProgressRow.hidden = !fKindCriminal.checked;
+}
+[fKindCivil, fKindCriminal, fKindFamily, fKindOther].forEach((cb) => {
+  cb.addEventListener("change", () => { updateKindUI(); refreshStatusBadge(); });
 });
-fClientRole.addEventListener("change", updateDefendantSectionVisibility);
+fCriminalProgress.addEventListener("change", refreshStatusBadge);
 
-function initClientRoleSelect() {
-  fClientRole.innerHTML = `
-    <option value="suspect">피의자</option>
-    <option value="victim">피해자</option>
-  `;
+/* ---- 상태 자동/수동 ---- */
+function currentDraftParts() {
+  return {
+    kind: collectKind(),
+    subCases: collectSubcases(),
+    hearings: collectHearings(),
+    criminalProgress: fCriminalProgress.value
+  };
 }
-function updateDefendantSectionVisibility() {
-  // 상대방(피고) 대응 현황은 의뢰인이 "피해자"인 사건에서만 의미가 있음
-  defendantSectionEl.hidden = fClientRole.value !== "victim";
+function refreshStatusBadge() {
+  const autoStatus = computeAutoStatusFromParts(currentDraftParts());
+  const effective = modalStatusMode === "manual" ? modalManualStatus : autoStatus;
+  statusBadgeEl.textContent = STATUS_LABEL[effective] + (modalStatusMode === "manual" ? " (수동)" : "");
+  statusBadgeEl.className = "badge badge-status badge-status-" + effective;
+  fStatusManual.value = effective;
+  statusAutoBtn.hidden = modalStatusMode !== "manual";
+  statusAutoHint.textContent = modalStatusMode === "manual"
+    ? "수동으로 상태를 고정했습니다. 데이터가 바뀌어도 자동으로는 바뀌지 않습니다."
+    : "현재 자동으로 분류되고 있습니다 (구분/사건번호/기일/진행현황에 따라 자동으로 바뀝니다).";
 }
-
-function openCaseModal(caseId) {
-  caseForm.reset();
-  defendantListEl.innerHTML = "";
-  hearingListEl.innerHTML = "";
-  fCategoryCustomRow.hidden = true;
-  initClientRoleSelect();
-
-  const kase = caseId ? cases.find((k) => k.id === caseId) : null;
-  document.getElementById("case-id").value = caseId || "";
-  caseModalTitle.textContent = kase ? "사건 수정" : "새 사건 등록";
-  deleteCaseBtn.hidden = !kase;
-  closeCaseBtn.hidden = !kase || !!kase.closed;
-
-  if (kase) {
-    document.getElementById("f-caseNumber").value = kase.caseNumber || "";
-    document.getElementById("f-caseName").value = kase.caseName || "";
-    document.getElementById("f-clientName").value = kase.clientName || "";
-    fRetainedDate.value = kase.retainedDate || "";
-    fMemo.value = kase.memo || "";
-    fCaseKind.value = kase.caseKind || "civil";
-    fClientRole.value = kase.clientRole || "suspect";
-
-    const presetCategories = Array.from(fCategory.options).map((o) => o.value);
-    if (kase.category && !presetCategories.includes(kase.category)) {
-      fCategory.value = "기타";
-      fCategoryCustomRow.hidden = false;
-      fCategoryCustom.value = kase.category;
-    } else {
-      fCategory.value = kase.category || "보이스피싱";
-    }
-
-    const presetCourts = Array.from(fCourt.options).map((o) => o.value);
-    if (kase.court && !presetCourts.includes(kase.court)) {
-      fCourt.value = "기타";
-      fCourtCustom.value = kase.court;
-    } else {
-      fCourt.value = kase.court || "서울중앙지방법원";
-    }
-
-    (kase.defendants || []).forEach((d) => addDefendantRow(d.name, d.responded));
-    (kase.hearings || []).forEach((h) => addHearingRow(h.id, h.date, h.type, h.note));
-  } else {
-    fClientRole.value = "suspect";
+statusOverrideBtn.addEventListener("click", () => {
+  modalStatusMode = "manual";
+  modalManualStatus = fStatusManual.value;
+  refreshStatusBadge();
+});
+statusAutoBtn.addEventListener("click", () => {
+  modalStatusMode = "auto";
+  refreshStatusBadge();
+});
+fStatusManual.addEventListener("change", () => {
+  if (modalStatusMode === "manual") {
+    modalManualStatus = fStatusManual.value;
+    refreshStatusBadge();
   }
+});
 
-  updateDefendantSectionVisibility();
-  caseModal.hidden = false;
+/* ---- 제출자 자동완성 (상대방 제출서류) ---- */
+function ensureSubmitterDatalist() {
+  let dl = document.getElementById("submitter-datalist");
+  if (!dl) {
+    dl = document.createElement("datalist");
+    dl.id = "submitter-datalist";
+    document.body.appendChild(dl);
+  }
+  return dl;
+}
+function refreshSubmitterDatalist() {
+  const dl = ensureSubmitterDatalist();
+  const names = Array.from(respondentListEl.querySelectorAll('[data-field="name"]')).map((i) => i.value.trim()).filter(Boolean);
+  dl.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
 }
 
-document.getElementById("add-defendant-btn").addEventListener("click", () => addDefendantRow("", false));
-document.getElementById("add-hearing-btn").addEventListener("click", () => addHearingRow(uid(), "", "trial", ""));
-
-function addDefendantRow(name, responded) {
+/* ---- 공통: 행 생성 도우미 ---- */
+function appendSubrow(container, innerHtml, onRemove) {
   const row = document.createElement("div");
-  row.className = "defendant-row";
-  row.innerHTML = `
-    <input type="text" placeholder="피고 이름 (선택)" value="${escapeHtml(name || "")}" />
-    <label style="display:flex;align-items:center;gap:5px;font-weight:400;font-size:12px;white-space:nowrap;">
-      <input type="checkbox" ${responded ? "checked" : ""} /> 대응함
-    </label>
-    <button type="button" class="row-remove-btn">×</button>
-  `;
-  row.querySelector(".row-remove-btn").addEventListener("click", () => row.remove());
-  defendantListEl.appendChild(row);
+  row.className = "subrow";
+  row.innerHTML = innerHtml + `<button type="button" class="row-remove-btn">×</button>`;
+  row.querySelector(".row-remove-btn").addEventListener("click", () => {
+    row.remove();
+    if (onRemove) onRemove();
+    refreshStatusBadge();
+  });
+  container.appendChild(row);
+  return row;
+}
+function fieldVal(row, field) {
+  const el = row.querySelector(`[data-field="${field}"]`);
+  if (!el) return "";
+  if (el.type === "checkbox") return el.checked;
+  return el.value.trim ? el.value.trim() : el.value;
+}
+function rowsOf(container) { return Array.from(container.querySelectorAll(".subrow")); }
+
+/* ---- 사건번호 (subCases) ---- */
+document.getElementById("add-subcase-btn").addEventListener("click", () => addSubcaseRow());
+subcaseListEl.addEventListener("input", refreshStatusBadge);
+function addSubcaseRow(s = {}) {
+  appendSubrow(subcaseListEl, `
+    <input type="text" data-field="agency" placeholder="관할기관 (예: 서울중앙지방법원)" value="${escapeHtml(s.agency || "")}" />
+    <input type="text" data-field="caseNumber" placeholder="사건번호 (예: 2024가단12345)" value="${escapeHtml(s.caseNumber || "")}" />
+    <input type="text" data-field="caseName" placeholder="사건명" value="${escapeHtml(s.caseName || "")}" />
+  `);
+}
+function collectSubcases() {
+  return rowsOf(subcaseListEl)
+    .map((row) => ({ id: row.dataset.id || uid(), agency: fieldVal(row, "agency"), caseNumber: fieldVal(row, "caseNumber"), caseName: fieldVal(row, "caseName") }))
+    .filter((s) => s.agency || s.caseNumber || s.caseName);
 }
 
-function addHearingRow(id, date, type, note) {
-  const row = document.createElement("div");
-  row.className = "hearing-row";
-  row.dataset.id = id || uid();
-  row.innerHTML = `
-    <input type="date" value="${date || ""}" required />
-    <select>
-      <option value="trial" ${type !== "pleading" ? "selected" : ""}>재판기일</option>
-      <option value="pleading" ${type === "pleading" ? "selected" : ""}>변론기일</option>
+/* ---- 원고/피해자 (plaintiffs) ---- */
+document.getElementById("add-plaintiff-btn").addEventListener("click", () => addPlaintiffRow());
+function addPlaintiffRow(p = {}) {
+  appendSubrow(plaintiffListEl, `
+    <input type="text" data-field="name" placeholder="이름" value="${escapeHtml(p.name || "")}" />
+    <input type="text" data-field="phone" placeholder="연락처 (선택)" value="${escapeHtml(p.phone || "")}" />
+  `);
+}
+function collectPlaintiffs() {
+  return rowsOf(plaintiffListEl)
+    .map((row) => ({ id: row.dataset.id || uid(), name: fieldVal(row, "name"), phone: fieldVal(row, "phone") }))
+    .filter((p) => p.name);
+}
+
+/* ---- 피고/피고인 (respondents) ---- */
+document.getElementById("add-respondent-btn").addEventListener("click", () => { addRespondentRow(); refreshSubmitterDatalist(); });
+respondentListEl.addEventListener("input", refreshSubmitterDatalist);
+function addRespondentRow(r = {}) {
+  appendSubrow(respondentListEl, `
+    <input type="text" data-field="name" placeholder="이름" value="${escapeHtml(r.name || "")}" />
+    <input type="text" data-field="phone" placeholder="연락처 (선택)" value="${escapeHtml(r.phone || "")}" />
+  `, refreshSubmitterDatalist);
+}
+function collectRespondents() {
+  return rowsOf(respondentListEl)
+    .map((row) => ({ id: row.dataset.id || uid(), name: fieldVal(row, "name"), phone: fieldVal(row, "phone") }))
+    .filter((r) => r.name);
+}
+
+/* ---- 접수서류 (filings) ---- */
+document.getElementById("add-filing-btn").addEventListener("click", () => addFilingRow());
+function addFilingRow(f = {}) {
+  appendSubrow(filingListEl, `
+    <input type="date" data-field="date" value="${f.date || ""}" />
+    <input type="text" data-field="name" placeholder="서류명" value="${escapeHtml(f.name || "")}" />
+  `);
+}
+function collectFilings() {
+  return rowsOf(filingListEl)
+    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), name: fieldVal(row, "name") }))
+    .filter((f) => f.date || f.name);
+}
+
+/* ---- 보정명령 (corrections, D-day) ---- */
+document.getElementById("add-correction-btn").addEventListener("click", () => addCorrectionRow());
+correctionListEl.addEventListener("input", (e) => {
+  const row = e.target.closest(".subrow");
+  if (row) updateCorrectionRowDday(row);
+  refreshStatusBadge();
+});
+correctionListEl.addEventListener("change", (e) => {
+  const row = e.target.closest(".subrow");
+  if (row) updateCorrectionRowDday(row);
+});
+function addCorrectionRow(c = {}) {
+  const row = appendSubrow(correctionListEl, `
+    <input type="date" data-field="date" placeholder="발령일" value="${c.date || ""}" />
+    <input type="date" data-field="deadline" placeholder="기한" value="${c.deadline || ""}" />
+    <input type="text" data-field="name" placeholder="내용" value="${escapeHtml(c.name || "")}" />
+    <label class="subrow-checkbox-label"><input type="checkbox" data-field="completed" ${c.completed ? "checked" : ""} /> 완료</label>
+    <span class="badge badge-dday" data-dday></span>
+  `);
+  updateCorrectionRowDday(row);
+}
+function updateCorrectionRowDday(row) {
+  const deadline = fieldVal(row, "deadline");
+  const completed = fieldVal(row, "completed");
+  const badge = row.querySelector("[data-dday]");
+  if (!badge) return;
+  if (completed) { badge.textContent = "완료"; badge.className = "badge badge-dday badge-dday-done"; return; }
+  if (!deadline) { badge.textContent = ""; badge.className = "badge badge-dday"; return; }
+  const diff = daysBetween(todayStr(), deadline);
+  const cls = diff < 0 ? "badge-dday-danger" : diff <= 3 ? "badge-dday-warning" : "badge-dday-neutral";
+  badge.textContent = diff === 0 ? "D-DAY" : diff > 0 ? `D-${diff}` : `D+${-diff}`;
+  badge.className = "badge badge-dday " + cls;
+}
+function collectCorrections() {
+  return rowsOf(correctionListEl)
+    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), deadline: fieldVal(row, "deadline"), name: fieldVal(row, "name"), completed: fieldVal(row, "completed") }))
+    .filter((c) => c.date || c.deadline || c.name);
+}
+
+/* ---- 기일 (hearings) ---- */
+document.getElementById("add-hearing-btn").addEventListener("click", () => addHearingRow());
+hearingListEl.addEventListener("input", refreshStatusBadge);
+hearingListEl.addEventListener("change", refreshStatusBadge);
+function addHearingRow(h = {}) {
+  appendSubrow(hearingListEl, `
+    <input type="date" data-field="date" value="${h.date || ""}" />
+    <input type="time" data-field="time" value="${h.time || ""}" />
+    <select data-field="type" class="subrow-select-sm">
+      ${HEARING_TYPES.map((t) => `<option value="${t}" ${h.type === t ? "selected" : ""}>${t}</option>`).join("")}
     </select>
-    <input type="text" placeholder="메모 (선택)" value="${escapeHtml(note || "")}" />
-    <button type="button" class="row-remove-btn">×</button>
-  `;
-  row.querySelector(".row-remove-btn").addEventListener("click", () => row.remove());
-  hearingListEl.appendChild(row);
-}
-
-function collectDefendants() {
-  // 의뢰인이 "피해자"가 아닌 사건은 상대방 대응 현황을 추적하지 않음
-  if (fClientRole.value !== "victim") return [];
-  return Array.from(defendantListEl.querySelectorAll(".defendant-row")).map((row) => ({
-    name: row.querySelector('input[type="text"]').value.trim(),
-    responded: row.querySelector('input[type="checkbox"]').checked
-  }));
+    <input type="text" data-field="court" placeholder="법정/재판부" value="${escapeHtml(h.court || "")}" />
+    <input type="text" data-field="location" placeholder="장소 / 영상재판 링크" value="${escapeHtml(h.location || "")}" />
+  `);
 }
 function collectHearings() {
-  return Array.from(hearingListEl.querySelectorAll(".hearing-row"))
+  return rowsOf(hearingListEl)
     .map((row) => ({
-      id: row.dataset.id,
-      date: row.querySelector('input[type="date"]').value,
-      type: row.querySelector("select").value,
-      note: row.querySelector('input[type="text"]').value.trim()
+      id: row.dataset.id || uid(),
+      date: fieldVal(row, "date"),
+      time: fieldVal(row, "time"),
+      type: fieldVal(row, "type") || "변론기일",
+      court: fieldVal(row, "court"),
+      location: fieldVal(row, "location")
     }))
-    .filter((h) => h.date); // 날짜 비어있는 행은 저장하지 않음
+    .filter((h) => h.date);
+}
+
+/* ---- 제출서류 (우리 측, ourFilings) ---- */
+document.getElementById("add-ourfiling-btn").addEventListener("click", () => addOurFilingRow());
+function addOurFilingRow(f = {}) {
+  appendSubrow(ourfilingListEl, `
+    <input type="date" data-field="date" value="${f.date || ""}" />
+    <input type="text" data-field="name" placeholder="서류명" value="${escapeHtml(f.name || "")}" />
+  `);
+}
+function collectOurFilings() {
+  return rowsOf(ourfilingListEl)
+    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), name: fieldVal(row, "name") }))
+    .filter((f) => f.date || f.name);
+}
+
+/* ---- 상대방 제출서류 (oppFilings) ---- */
+document.getElementById("add-oppfiling-btn").addEventListener("click", () => addOppFilingRow());
+function addOppFilingRow(f = {}) {
+  appendSubrow(oppfilingListEl, `
+    <input type="date" data-field="date" value="${f.date || ""}" />
+    <input type="text" data-field="name" placeholder="서류명" value="${escapeHtml(f.name || "")}" />
+    <input type="text" data-field="submitter" placeholder="제출자" list="submitter-datalist" value="${escapeHtml(f.submitter || "")}" />
+  `);
+}
+function collectOppFilings() {
+  return rowsOf(oppfilingListEl)
+    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), name: fieldVal(row, "name"), submitter: fieldVal(row, "submitter") }))
+    .filter((f) => f.date || f.name);
+}
+
+/* ---- 메모 (notes) ---- */
+document.getElementById("add-note-btn").addEventListener("click", () => addNoteRow({ date: todayStr() }));
+function addNoteRow(n = {}) {
+  appendSubrow(noteListEl, `
+    <input type="date" data-field="date" value="${n.date || ""}" />
+    <textarea data-field="text" placeholder="메모 내용">${escapeHtml(n.text || "")}</textarea>
+  `);
+}
+function collectNotes() {
+  return rowsOf(noteListEl)
+    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), text: fieldVal(row, "text") }))
+    .filter((n) => n.text);
+}
+function collectKind() {
+  return {
+    civil: fKindCivil.checked,
+    criminal: fKindCriminal.checked,
+    family: fKindFamily.checked,
+    other: fKindOther.checked,
+    otherText: fKindOtherText.value.trim()
+  };
+}
+
+/* ---- 모달 열기 ---- */
+function clearSublists() {
+  [subcaseListEl, plaintiffListEl, respondentListEl, filingListEl, correctionListEl, hearingListEl, ourfilingListEl, oppfilingListEl, noteListEl]
+    .forEach((el) => { el.innerHTML = ""; });
+}
+function openCaseModal(caseId) {
+  caseForm.reset();
+  clearSublists();
+
+  const m = caseId ? matters.find((k) => k.id === caseId) : null;
+  document.getElementById("case-id").value = caseId || "";
+  caseModalTitle.textContent = m ? "사건 수정" : "사건 등록";
+  deleteCaseBtn.hidden = !m;
+  closeCaseBtn.hidden = !m || !!m.closed;
+
+  if (m) {
+    fKindCivil.checked = !!m.kind?.civil;
+    fKindCriminal.checked = !!m.kind?.criminal;
+    fKindFamily.checked = !!m.kind?.family;
+    fKindOther.checked = !!m.kind?.other;
+    fKindOtherText.value = m.kind?.otherText || "";
+    fCriminalProgress.value = m.criminalProgress || "";
+    fLawyer.value = m.lawyer || "";
+
+    (m.subCases || []).forEach(addSubcaseRow);
+    (m.plaintiffs || []).forEach(addPlaintiffRow);
+    (m.respondents || []).forEach(addRespondentRow);
+    (m.filings || []).forEach(addFilingRow);
+    (m.corrections || []).forEach(addCorrectionRow);
+    (m.hearings || []).forEach(addHearingRow);
+    (m.ourFilings || []).forEach(addOurFilingRow);
+    (m.oppFilings || []).forEach(addOppFilingRow);
+    (m.notes || []).forEach(addNoteRow);
+
+    modalStatusMode = m.statusMode === "manual" ? "manual" : "auto";
+    modalManualStatus = m.manualStatus || computeAutoStatus(m);
+  } else {
+    fCriminalProgress.value = "";
+    fLawyer.value = "";
+    modalStatusMode = "auto";
+    modalManualStatus = "unfiled";
+  }
+
+  updateKindUI();
+  refreshSubmitterDatalist();
+  refreshStatusBadge();
+  caseModal.hidden = false;
 }
 
 caseForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const id = document.getElementById("case-id").value;
-  const category = fCategory.value === "기타" ? fCategoryCustom.value.trim() : fCategory.value;
-  const court = fCourt.value === "기타" ? fCourtCustom.value.trim() : fCourt.value;
 
   const payload = {
-    caseNumber: document.getElementById("f-caseNumber").value.trim(),
-    caseName: document.getElementById("f-caseName").value.trim(),
-    clientName: document.getElementById("f-clientName").value.trim(),
-    retainedDate: fRetainedDate.value || "",
-    memo: fMemo.value.trim(),
-    caseKind: fCaseKind.value,
-    clientRole: fClientRole.value,
-    category,
-    court,
-    defendants: collectDefendants(),
+    statusMode: modalStatusMode,
+    manualStatus: modalStatusMode === "manual" ? fStatusManual.value : null,
+    kind: collectKind(),
+    criminalProgress: fCriminalProgress.value,
+    subCases: collectSubcases(),
+    plaintiffs: collectPlaintiffs(),
+    respondents: collectRespondents(),
+    lawyer: fLawyer.value,
+    filings: collectFilings(),
+    corrections: collectCorrections(),
     hearings: collectHearings(),
+    ourFilings: collectOurFilings(),
+    oppFilings: collectOppFilings(),
+    notes: collectNotes(),
     updatedAt: serverTimestamp()
   };
 
   try {
     if (id) {
-      await updateDoc(doc(db, "cases", id), payload);
+      await updateDoc(doc(db, "matters", id), payload);
     } else {
+      payload.closed = false;
       payload.createdAt = serverTimestamp();
-      await addDoc(casesCol, payload);
+      await addDoc(mattersCol, payload);
     }
     closeModal("case-modal");
   } catch (err) {
@@ -516,7 +742,7 @@ deleteCaseBtn.addEventListener("click", async () => {
   if (!id) return;
   if (!confirm("이 사건을 삭제하시겠습니까? 되돌릴 수 없습니다.")) return;
   try {
-    await deleteDoc(doc(db, "cases", id));
+    await deleteDoc(doc(db, "matters", id));
     closeModal("case-modal");
   } catch (err) {
     alert("삭제 중 오류가 발생했습니다: " + err.message);
@@ -534,9 +760,9 @@ closeCaseBtn.addEventListener("click", async () => {
 /* 종결: 삭제가 아니라 상태만 바꿔서 "종결" 탭으로 옮김. 언제든 "다시 열기"로 복구 가능.
    영구종결: 실제로 Firestore 문서를 삭제해 서버(Firestore) 저장 용량/문서 수를 줄임. */
 async function closeCase(caseId) {
-  if (!confirm("이 사건을 종결 처리하시겠습니까?\n\"종결\" 탭으로 이동되며, 사건 총집합/캘린더/대응 필요 목록에서는 더 이상 보이지 않습니다.")) return false;
+  if (!confirm("이 사건을 종결 처리하시겠습니까?\n\"종결\" 탭으로 이동되며, 사건관리/캘린더 목록에서는 더 이상 보이지 않습니다.")) return false;
   try {
-    await updateDoc(doc(db, "cases", caseId), { closed: true, closedAt: serverTimestamp() });
+    await updateDoc(doc(db, "matters", caseId), { closed: true, closedAt: serverTimestamp() });
     switchTab("closed");
     return true;
   } catch (err) {
@@ -544,32 +770,29 @@ async function closeCase(caseId) {
     return false;
   }
 }
-
 async function reopenCase(caseId) {
   if (!confirm("이 사건을 다시 진행 중 상태로 되돌리시겠습니까?")) return;
   try {
-    await updateDoc(doc(db, "cases", caseId), { closed: false, closedAt: null });
+    await updateDoc(doc(db, "matters", caseId), { closed: false, closedAt: null });
   } catch (err) {
     alert("처리 중 오류: " + err.message);
   }
 }
-
 async function permanentlyDeleteCase(caseId) {
   if (!confirm("이 사건을 영구 삭제하시겠습니까?\n서버(Firestore)에서 완전히 삭제되어 되돌릴 수 없습니다. 필요하면 먼저 백업하세요.")) return;
   try {
-    await deleteDoc(doc(db, "cases", caseId));
+    await deleteDoc(doc(db, "matters", caseId));
   } catch (err) {
     alert("삭제 중 오류: " + err.message);
   }
 }
-
 async function permanentlyDeleteAllClosed() {
-  const list = cases.filter((k) => k.closed);
+  const list = matters.filter((m) => m.closed);
   if (!list.length) { alert("영구 삭제할 종결된 사건이 없습니다."); return; }
   if (!confirm(`종결된 사건 ${list.length}건을 모두 영구 삭제하시겠습니까?\n서버(Firestore)에서 완전히 삭제되어 되돌릴 수 없습니다. 필요하면 먼저 백업하세요.`)) return;
   if (!confirm("정말 진행할까요? 마지막 확인입니다. 이 작업은 취소할 수 없습니다.")) return;
   try {
-    await Promise.all(list.map((k) => deleteDoc(doc(db, "cases", k.id))));
+    await Promise.all(list.map((m) => deleteDoc(doc(db, "matters", m.id))));
   } catch (err) {
     alert("일괄 삭제 중 오류: " + err.message);
   }
@@ -585,12 +808,12 @@ document.querySelectorAll(".modal-overlay").forEach((overlay) => {
 });
 function closeModal(id) { document.getElementById(id).hidden = true; }
 
-/* ---------------- Calendar (캘린더) ---------------- */
+/* ---------------- 캘린더 ---------------- */
 const calendarGrid = document.getElementById("calendar-grid");
 const calendarTitle = document.getElementById("calendar-title");
 
-document.getElementById("cal-prev").addEventListener("click", () => { shiftMonth(-1); });
-document.getElementById("cal-next").addEventListener("click", () => { shiftMonth(1); });
+document.getElementById("cal-prev").addEventListener("click", () => shiftMonth(-1));
+document.getElementById("cal-next").addEventListener("click", () => shiftMonth(1));
 document.getElementById("cal-today").addEventListener("click", () => {
   const now = new Date();
   calState = { year: now.getFullYear(), month: now.getMonth() };
@@ -604,15 +827,32 @@ function shiftMonth(delta) {
   renderCalendar();
 }
 
+function allHearingsFlat() {
+  const out = [];
+  for (const m of matters) {
+    if (m.closed) continue;
+    for (const h of (m.hearings || [])) {
+      if (h.date) out.push({ ...h, matter: m });
+    }
+  }
+  return out;
+}
+
+function personNamesLabel(list) {
+  if (!list || !list.length) return "-";
+  const first = list[0].name;
+  return list.length > 1 ? `${first} 외 ${list.length - 1}명` : first;
+}
+
 function renderCalendar() {
   const { year, month } = calState;
   calendarTitle.textContent = `${year}년 ${month + 1}월`;
 
-  // map date -> [hearing entries]
   const byDate = {};
   for (const h of allHearingsFlat()) {
     (byDate[h.date] ||= []).push(h);
   }
+  Object.values(byDate).forEach((list) => list.sort((a, b) => (a.time || "").localeCompare(b.time || "")));
 
   calendarGrid.innerHTML = "";
   ["일", "월", "화", "수", "목", "금", "토"].forEach((w) => {
@@ -623,10 +863,9 @@ function renderCalendar() {
   });
 
   const firstOfMonth = new Date(year, month, 1);
-  const startOffset = firstOfMonth.getDay(); // 0=Sun
+  const startOffset = firstOfMonth.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const today = todayStr();
-  const upcomingLimit = fourWeeksFromToday();
 
   for (let i = 0; i < startOffset; i++) {
     const el = document.createElement("div");
@@ -644,138 +883,36 @@ function renderCalendar() {
     cell.appendChild(num);
 
     const events = byDate[dateStr] || [];
-    for (const h of events.slice(0, 3)) {
-      const stats = defendantStats(h.case);
-      const isVictimCase = h.case.clientRole === "victim";
-      const isUpcoming = dateStr >= today && dateStr <= upcomingLimit;
+    const LIMIT = 3;
+    for (const h of events.slice(0, LIMIT)) {
+      const m = h.matter;
+      const isVerdict = h.type === "선고기일";
+      const caseNo = (m.subCases && m.subCases[0]) ? `${m.subCases[0].agency || ""} ${m.subCases[0].caseNumber || ""}`.trim() : "";
+      const caseName = (m.subCases && m.subCases[0] && m.subCases[0].caseName) || "";
       const evEl = document.createElement("div");
-      evEl.className = "cal-event " + (isVictimCase && stats.needsResponse ? "incomplete" : "") + (isUpcoming ? " upcoming" : "");
-      const ratioText = isVictimCase ? ` (${stats.responded}/${stats.total})` : "";
-      // 사건명을 가장 먼저, 굵게 표시해서 한눈에 어떤 사건인지 알아보기 쉽게 함
+      evEl.className = "cal-event" + (isVerdict ? " verdict" : "");
       evEl.innerHTML = `
-        <span class="cal-event-case">${escapeHtml(h.case.caseName || h.case.caseNumber)}</span>
-        <span class="cal-event-sub">${hearingTypeLabel(h.type)}${ratioText}</span>
+        <span class="cal-event-case">${escapeHtml(caseName || caseNo || "사건")}</span>
+        <span class="cal-event-sub">${escapeHtml(h.type || "기일")}${h.time ? " " + h.time : ""}</span>
       `;
-      evEl.title = `${h.case.caseNumber} · ${h.case.clientName || ""}`;
-      evEl.addEventListener("click", (e) => { e.stopPropagation(); openCaseModal(h.case.id); });
+      evEl.title = [
+        caseNo,
+        `의뢰인: ${personNamesLabel(m.plaintiffs)}`,
+        `상대방: ${personNamesLabel(m.respondents)}`,
+        h.court ? `법정: ${h.court}` : "",
+        h.location ? `장소/링크: ${h.location}` : ""
+      ].filter(Boolean).join("\n");
+      evEl.addEventListener("click", (e) => { e.stopPropagation(); openCaseModal(m.id); });
       cell.appendChild(evEl);
     }
-    if (events.length > 3) {
+    if (events.length > LIMIT) {
       const more = document.createElement("div");
-      more.className = "cal-event";
-      more.style.background = "transparent";
-      more.style.color = "var(--color-text-muted)";
-      more.textContent = `+${events.length - 3}건 더보기`;
+      more.className = "cal-more";
+      more.textContent = `+${events.length - LIMIT}건 더보기`;
       cell.appendChild(more);
     }
-
-    cell.addEventListener("click", () => openDayModal(dateStr));
     calendarGrid.appendChild(cell);
   }
-}
-
-/* ---------------- Day modal (특정 날짜에 기일 추가) ---------------- */
-const dayModal = document.getElementById("day-modal");
-const dayModalTitle = document.getElementById("day-modal-title");
-const dayHearingList = document.getElementById("day-hearing-list");
-const dayCaseSelect = document.getElementById("day-case-select");
-
-function openDayModal(dateStr) {
-  selectedDayDate = dateStr;
-  dayModalTitle.textContent = `${formatKorDate(dateStr)} 기일`;
-
-  dayHearingList.innerHTML = "";
-  const todaysHearings = allHearingsFlat().filter((h) => h.date === dateStr);
-  if (!todaysHearings.length) {
-    dayHearingList.innerHTML = `<p class="form-hint" style="margin:0;">이 날짜에 등록된 기일이 없습니다.</p>`;
-  } else {
-    for (const h of todaysHearings) {
-      const stats = defendantStats(h.case);
-      const isVictimCase = h.case.clientRole === "victim";
-      const item = document.createElement("div");
-      item.className = "day-hearing-item";
-      item.innerHTML = `
-        <span><b>${escapeHtml(h.case.caseName || h.case.caseNumber)}</b> · ${hearingTypeLabel(h.type)}
-          ${isVictimCase ? `<span class="badge ${stats.needsResponse ? "badge-incomplete" : "badge-complete"}">${stats.responded}/${stats.total}</span>` : ""}
-        </span>
-        <button type="button" class="btn btn-sm">사건 열기</button>
-      `;
-      item.querySelector("button").addEventListener("click", () => { closeModal("day-modal"); openCaseModal(h.case.id); });
-      dayHearingList.appendChild(item);
-    }
-  }
-
-  dayCaseSelect.innerHTML = cases
-    .filter((k) => !k.closed)
-    .sort((a, b) => (a.caseNumber || "").localeCompare(b.caseNumber || ""))
-    .map((k) => `<option value="${k.id}">${escapeHtml(k.caseNumber || "")} · ${escapeHtml(k.caseName || "")}</option>`)
-    .join("");
-
-  document.getElementById("day-hearing-note").value = "";
-  dayModal.hidden = false;
-}
-
-document.getElementById("day-add-hearing-btn").addEventListener("click", async () => {
-  const caseId = dayCaseSelect.value;
-  if (!caseId) { alert("먼저 사건을 등록하세요."); return; }
-  const kase = cases.find((k) => k.id === caseId);
-  if (!kase) return;
-  const type = document.getElementById("day-hearing-type").value;
-  const note = document.getElementById("day-hearing-note").value.trim();
-  const newHearing = { id: uid(), date: selectedDayDate, type, note };
-  const hearings = [...(kase.hearings || []), newHearing];
-  try {
-    await updateDoc(doc(db, "cases", caseId), { hearings, updatedAt: serverTimestamp() });
-    openDayModal(selectedDayDate); // refresh list in place
-  } catch (err) {
-    alert("저장 중 오류: " + err.message);
-  }
-});
-
-/* ---------------- Response tab (대응 필요) ---------------- */
-const responseList = document.getElementById("response-list");
-const responseEmpty = document.getElementById("response-empty");
-const responseCountBadge = document.getElementById("response-count-badge");
-
-/* 사건(케이스) 단위로 1건씩만 집계: 상대방(피고) 중 한 명이라도 대응했으면 그 사건 전체가 대상.
-   피해자 사건이 아니면(= 상대방 대응 추적 대상이 아니면) 애초에 제외됨. */
-function casesNeedingResponse() {
-  return cases
-    .filter((k) => !k.closed && k.clientRole === "victim")
-    .map((k) => ({ case: k, stats: defendantStats(k), nh: nextHearing(k) }))
-    .filter((x) => x.stats.needsResponse)
-    .sort((a, b) => {
-      const ad = a.nh ? a.nh.date : "9999-99-99";
-      const bd = b.nh ? b.nh.date : "9999-99-99";
-      return ad.localeCompare(bd);
-    });
-}
-
-function renderResponseTab() {
-  const list = casesNeedingResponse();
-  responseList.innerHTML = "";
-  responseEmpty.hidden = list.length > 0;
-
-  for (const { case: kase, stats, nh } of list) {
-    const card = document.createElement("div");
-    card.className = "response-card";
-    card.innerHTML = `
-      <div class="response-card-main">
-        <span class="response-card-title">${escapeHtml(kase.caseName || kase.caseNumber)} <span class="badge ${kase.caseKind === "criminal" ? "badge-criminal" : "badge-civil"}">${kase.caseKind === "criminal" ? "형사" : "민사"}</span></span>
-        <span class="response-card-meta">${escapeHtml(kase.caseNumber || "")} · ${escapeHtml(kase.clientName || "")} · ${escapeHtml(kase.court || "")}</span>
-        <span class="response-card-meta">${nh ? `${formatKorDate(nh.date)} · ${hearingTypeLabel(nh.type)} 예정` : "등록된 기일 없음"}</span>
-      </div>
-      <div class="response-card-ratio">${stats.responded}/${stats.total}</div>
-    `;
-    card.addEventListener("click", () => openCaseModal(kase.id));
-    responseList.appendChild(card);
-  }
-}
-
-function updateResponseBadge() {
-  const count = casesNeedingResponse().length;
-  responseCountBadge.hidden = count === 0;
-  responseCountBadge.textContent = count;
 }
 
 /* ---------------- 종결 탭 ---------------- */
@@ -784,7 +921,7 @@ const closedEmpty = document.getElementById("closed-empty");
 const closedCountBadge = document.getElementById("closed-count-badge");
 
 function closedCasesSorted() {
-  return cases.filter((k) => k.closed).sort((a, b) => {
+  return matters.filter((m) => m.closed).sort((a, b) => {
     const ad = a.closedAt && typeof a.closedAt.toDate === "function" ? a.closedAt.toDate().getTime() : 0;
     const bd = b.closedAt && typeof b.closedAt.toDate === "function" ? b.closedAt.toDate().getTime() : 0;
     return bd - ad; // 최근 종결된 순
@@ -796,25 +933,27 @@ function renderClosedTab() {
   closedTableBody.innerHTML = "";
   closedEmpty.hidden = list.length > 0;
 
-  for (const kase of list) {
+  for (const m of list) {
+    const caseNoLabel = (m.subCases && m.subCases.length)
+      ? m.subCases.map((s) => `${s.agency || ""} ${s.caseNumber || ""}`.trim()).join(", ")
+      : "-";
+    const peopleLabel = [personNamesLabel(m.plaintiffs), personNamesLabel(m.respondents)].filter((v) => v && v !== "-").join(" · ") || "-";
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${escapeHtml(kase.caseNumber || "")}</td>
-      <td>${escapeHtml(kase.caseName || "")}</td>
-      <td>${escapeHtml(kase.clientName || "")}</td>
-      <td><span class="badge ${kase.caseKind === "criminal" ? "badge-criminal" : "badge-civil"}">${kase.caseKind === "criminal" ? "형사" : "민사"}</span></td>
-      <td>${formatTimestampKorDate(kase.closedAt)}</td>
-      <td>
+      <td>${escapeHtml(caseNoLabel)}</td>
+      <td>${escapeHtml(peopleLabel)}</td>
+      <td>${kindLabelHtml(m.kind)}</td>
+      <td>${formatTimestampKorDate(m.closedAt)}</td>
+      <td class="nowrap">
         <button type="button" class="btn btn-sm reopen-btn">다시 열기</button>
         <button type="button" class="btn btn-sm btn-danger permanent-delete-btn">영구종결</button>
       </td>
     `;
-    tr.querySelector(".reopen-btn").addEventListener("click", () => reopenCase(kase.id));
-    tr.querySelector(".permanent-delete-btn").addEventListener("click", () => permanentlyDeleteCase(kase.id));
+    tr.querySelector(".reopen-btn").addEventListener("click", () => reopenCase(m.id));
+    tr.querySelector(".permanent-delete-btn").addEventListener("click", () => permanentlyDeleteCase(m.id));
     closedTableBody.appendChild(tr);
   }
 }
-
 function updateClosedBadge() {
   const count = closedCasesSorted().length;
   closedCountBadge.hidden = count === 0;

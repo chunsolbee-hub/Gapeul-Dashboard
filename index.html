@@ -32,9 +32,8 @@
   <header class="app-header">
     <h1>사건관리 대시보드</h1>
     <nav class="tabs">
-      <button class="tab-btn active" data-tab="cases">사건 총집합</button>
+      <button class="tab-btn active" data-tab="matters">사건관리</button>
       <button class="tab-btn" data-tab="calendar">캘린더</button>
-      <button class="tab-btn" data-tab="response">대응 필요 <span id="response-count-badge" class="count-badge" hidden>0</span></button>
       <button class="tab-btn" data-tab="closed">종결 <span id="closed-count-badge" class="count-badge" hidden>0</span></button>
     </nav>
     <div class="header-right">
@@ -45,46 +44,57 @@
 
   <main class="app-main">
 
-    <!-- 사건 총집합 탭 -->
-    <section id="tab-cases" class="tab-panel active">
+    <!-- 사건관리 탭 -->
+    <section id="tab-matters" class="tab-panel active">
+
+      <div class="pinned-memo">
+        <label for="global-memo">메모 <span class="pinned-memo-tag">스크롤해도 고정</span></label>
+        <textarea id="global-memo" rows="2" placeholder="자유롭게 메모를 남겨두세요 (자동 저장)"></textarea>
+      </div>
+
       <div class="panel-toolbar">
-        <h2>사건 총집합</h2>
+        <h2>사건관리</h2>
         <div class="toolbar-actions">
-          <input type="search" id="case-search" placeholder="사건번호 / 의뢰인 / 사건명 검색" />
+          <input type="search" id="case-search" placeholder="사건번호 / 이름 / 사건명 검색" />
           <button type="button" id="export-csv-btn" class="btn btn-ghost">⬇ CSV 백업</button>
           <button type="button" id="export-json-btn" class="btn btn-ghost">⬇ JSON 백업</button>
-          <button id="new-case-btn" class="btn btn-primary">+ 새 사건 등록</button>
+          <button id="new-case-btn" class="btn btn-primary">+ 사건 등록</button>
         </div>
       </div>
+
       <div class="case-subtabs" id="case-subtabs">
-        <button type="button" class="subtab-btn active" data-subtab="all">전체</button>
-        <button type="button" class="subtab-btn" data-subtab="civil">민사</button>
-        <button type="button" class="subtab-btn" data-subtab="civil-soon">민사 · 2주 이내</button>
-        <button type="button" class="subtab-btn" data-subtab="criminal">형사</button>
-        <button type="button" class="subtab-btn" data-subtab="criminal-soon">형사 · 2주 이내</button>
+        <button type="button" class="subtab-btn active" data-subtab="all">전체건</button>
+        <button type="button" class="subtab-btn" data-subtab="unfiled">미접수</button>
+        <button type="button" class="subtab-btn" data-subtab="filed">접수사건</button>
+        <button type="button" class="subtab-btn" data-subtab="inprogress">진행사건</button>
+        <button type="button" class="subtab-btn" data-subtab="completed">완료사건</button>
+        <button type="button" class="subtab-btn" data-subtab="lawyer-천솔비">천솔비 담당사건</button>
+        <button type="button" class="subtab-btn" data-subtab="lawyer-김도영">김도영 담당사건</button>
       </div>
+
       <div class="table-wrap">
-        <table class="case-table">
+        <table class="case-table matters-table">
           <thead>
             <tr>
-              <th>사건번호</th>
-              <th class="sortable" data-sort="caseName">사건명<span class="sort-arrow"></span></th>
-              <th class="sortable" data-sort="clientName">의뢰인<span class="sort-arrow"></span></th>
+              <th>번호</th>
+              <th>상태</th>
               <th>구분</th>
-              <th>의뢰인 신분</th>
-              <th>사건분류</th>
-              <th>법원</th>
-              <th class="sortable" data-sort="retainedDate">의뢰일자<span class="sort-arrow"></span></th>
-              <th class="sortable" data-sort="pleadingDate">변론기일<span class="sort-arrow"></span></th>
-              <th class="sortable" data-sort="trialDate">재판기일<span class="sort-arrow"></span></th>
-              <th>피고 수</th>
-              <th>대응현황</th>
+              <th>사건번호</th>
+              <th>원고/피해자</th>
+              <th>피고/피고인</th>
+              <th>담당변호사</th>
+              <th>접수서류</th>
+              <th>보정명령</th>
+              <th>기일</th>
+              <th>제출서류</th>
+              <th>상대방 제출서류</th>
+              <th>메모</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="case-table-body"></tbody>
         </table>
-        <p id="case-empty" class="empty-msg" hidden>등록된 사건이 없습니다. 우측 상단의 "새 사건 등록" 버튼을 눌러 시작하세요.</p>
+        <p id="case-empty" class="empty-msg" hidden>등록된 사건이 없습니다. 우측 상단의 "사건 등록" 버튼을 눌러 시작하세요.</p>
       </div>
     </section>
 
@@ -99,21 +109,10 @@
         </div>
       </div>
       <p class="calendar-legend">
-        <span class="legend-item"><span class="dot dot-upcoming"></span>4주 이내 예정</span>
-        <span class="legend-item"><span class="dot dot-incomplete"></span>상대방 대응 있음 (대응 필요)</span>
-        <span class="legend-item"><span class="dot dot-complete"></span>상대방 대응 없음</span>
+        <span class="legend-item"><span class="dot dot-verdict"></span>선고기일</span>
+        <span class="legend-item"><span class="dot dot-hearing"></span>그 외 기일 (변론·조정·심문)</span>
       </p>
       <div id="calendar-grid" class="calendar-grid"></div>
-    </section>
-
-    <!-- 대응 필요 탭 -->
-    <section id="tab-response" class="tab-panel">
-      <div class="panel-toolbar">
-        <h2>대응 필요</h2>
-        <span class="form-hint" style="margin:0;">상대방(피고) 중 한 명이라도 대응해 온 사건이 아래에 자동으로 표시됩니다.</span>
-      </div>
-      <div id="response-list" class="response-list"></div>
-      <p id="response-empty" class="empty-msg" hidden>대응이 필요한 사건이 없습니다.</p>
     </section>
 
     <!-- 종결 탭 -->
@@ -122,14 +121,13 @@
         <h2>종결된 사건</h2>
         <button type="button" id="bulk-delete-closed-btn" class="btn btn-danger">🗑 전체 영구종결(일괄 삭제)</button>
       </div>
-      <p class="form-hint">"종결" 처리한 사건이 여기 모입니다. 잘못 종결했다면 "다시 열기"로 되돌릴 수 있고, "영구종결"을 누르면 서버에서 완전히 삭제되어 되돌릴 수 없습니다. 삭제 전 사건 총집합 탭의 백업 버튼으로 미리 백업해두는 것을 권장합니다.</p>
+      <p class="form-hint">"종결" 처리한 사건이 여기 모입니다. 잘못 종결했다면 "다시 열기"로 되돌릴 수 있고, "영구종결"을 누르면 서버에서 완전히 삭제되어 되돌릴 수 없습니다. 삭제 전 사건관리 탭의 백업 버튼으로 미리 백업해두는 것을 권장합니다.</p>
       <div class="table-wrap">
         <table class="case-table">
           <thead>
             <tr>
               <th>사건번호</th>
-              <th>사건명</th>
-              <th>의뢰인</th>
+              <th>원고/피해자 · 피고/피고인</th>
               <th>구분</th>
               <th>종결일</th>
               <th></th>
@@ -144,118 +142,153 @@
   </main>
 </div>
 
-<!-- 사건 등록/수정 모달 -->
+<!-- 사건 등록/편집 모달 -->
 <div id="case-modal" class="modal-overlay" hidden>
-  <div class="modal">
+  <div class="modal modal-lg">
     <div class="modal-header">
-      <h3 id="case-modal-title">새 사건 등록</h3>
+      <h3 id="case-modal-title">사건 등록</h3>
       <button class="modal-close" data-close="case-modal">&times;</button>
     </div>
     <form id="case-form" class="modal-body">
       <input type="hidden" id="case-id" />
 
-      <div class="form-row">
-        <label>사건번호 *
-          <input type="text" id="f-caseNumber" required placeholder="예: 2025가단12345" />
-        </label>
-        <label>구분 *
-          <select id="f-caseKind" required>
-            <option value="civil">민사</option>
-            <option value="criminal">형사</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label>사건명 *
-          <input type="text" id="f-caseName" required placeholder="예: 손해배상(기)" />
-        </label>
-        <label>의뢰인 이름 *
-          <input type="text" id="f-clientName" required />
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label>의뢰인 신분 *
-          <select id="f-clientRole" required></select>
-        </label>
-        <label>사건분류 *
-          <select id="f-category" required>
-            <option value="보이스피싱">보이스피싱</option>
-            <option value="이혼">이혼</option>
-            <option value="사기">사기</option>
-            <option value="폭행/상해">폭행/상해</option>
-            <option value="상속">상속</option>
-            <option value="채권채무">채권채무</option>
-            <option value="부동산">부동산</option>
-            <option value="노동">노동</option>
-            <option value="기타">기타(직접입력)</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="form-row" id="category-custom-row" hidden>
-        <label>사건분류 (직접입력)
-          <input type="text" id="f-category-custom" placeholder="분류명을 입력하세요" />
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label>법원지역 *
-          <select id="f-court" required>
-            <option value="서울중앙지방법원">서울중앙지방법원</option>
-            <option value="서울동부지방법원">서울동부지방법원</option>
-            <option value="서울남부지방법원">서울남부지방법원</option>
-            <option value="서울북부지방법원">서울북부지방법원</option>
-            <option value="서울서부지방법원">서울서부지방법원</option>
-            <option value="서울가정법원">서울가정법원</option>
-            <option value="의정부지방법원">의정부지방법원</option>
-            <option value="인천지방법원">인천지방법원</option>
-            <option value="수원지방법원">수원지방법원</option>
-            <option value="춘천지방법원">춘천지방법원</option>
-            <option value="대전지방법원">대전지방법원</option>
-            <option value="청주지방법원">청주지방법원</option>
-            <option value="대구지방법원">대구지방법원</option>
-            <option value="부산지방법원">부산지방법원</option>
-            <option value="울산지방법원">울산지방법원</option>
-            <option value="창원지방법원">창원지방법원</option>
-            <option value="광주지방법원">광주지방법원</option>
-            <option value="전주지방법원">전주지방법원</option>
-            <option value="제주지방법원">제주지방법원</option>
-            <option value="기타">기타(직접입력)</option>
-          </select>
-        </label>
-        <label>법원 (직접입력)
-          <input type="text" id="f-court-custom" placeholder="위 목록에 없을 경우 입력" />
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label>의뢰일자
-          <input type="date" id="f-retainedDate" />
-        </label>
-      </div>
-
-      <div class="form-section" id="defendant-section">
+      <!-- 상태 -->
+      <div class="form-section status-section">
         <div class="form-section-header">
-          <h4>상대방(피고) 목록</h4>
-          <button type="button" id="add-defendant-btn" class="btn btn-sm">+ 피고 추가</button>
+          <h4>진행상태</h4>
+          <span id="status-badge" class="badge badge-status">미접수</span>
         </div>
-        <p class="form-hint">의뢰인이 <b>피해자</b>인 사건에서만 표시됩니다. 상대방(피고)이 우리 측에 대응(답변/연락 등)해 오면 체크하세요. 한 명이라도 대응하면 이 사건은 자동으로 "대응 필요" 탭에 표시됩니다.</p>
-        <div id="defendant-list" class="defendant-list"></div>
+        <div class="status-controls">
+          <select id="f-status-manual">
+            <option value="unfiled">미접수</option>
+            <option value="filed">접수사건</option>
+            <option value="inprogress">진행사건</option>
+            <option value="completed">완료사건</option>
+          </select>
+          <button type="button" id="status-override-btn" class="btn btn-sm">이 상태로 수동 변경</button>
+          <button type="button" id="status-auto-btn" class="btn btn-sm btn-ghost" hidden>자동분류로 전환</button>
+        </div>
+        <p class="form-hint" id="status-auto-hint">현재 자동으로 분류되고 있습니다 (구분/접수서류/기일 등록 상황에 따라 자동으로 바뀝니다).</p>
       </div>
 
+      <!-- 구분 -->
+      <div class="form-section">
+        <h4>구분</h4>
+        <div class="kind-checks">
+          <label class="checkbox-label"><input type="checkbox" id="f-kind-civil" /> 민사</label>
+          <label class="checkbox-label"><input type="checkbox" id="f-kind-criminal" /> 형사</label>
+          <label class="checkbox-label"><input type="checkbox" id="f-kind-family" /> 가사</label>
+          <label class="checkbox-label"><input type="checkbox" id="f-kind-other" /> 기타</label>
+          <input type="text" id="f-kind-other-text" placeholder="기타 구분 입력" hidden />
+        </div>
+        <div id="criminal-progress-row" hidden>
+          <label>진행현황
+            <select id="f-criminal-progress">
+              <option value="">선택 안 함</option>
+              <option value="수사중">수사중</option>
+              <option value="수사중지">수사중지</option>
+              <option value="송치">송치</option>
+              <option value="불송치">불송치</option>
+              <option value="보완수사">보완수사</option>
+              <option value="기소">기소</option>
+              <option value="불기소">불기소</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <!-- 사건번호 (관할기관/사건번호/사건명 다건) -->
       <div class="form-section">
         <div class="form-section-header">
-          <h4>재판일자 / 변론기일</h4>
-          <button type="button" id="add-hearing-btn" class="btn btn-sm">+ 기일 추가</button>
+          <h4>사건번호</h4>
+          <button type="button" id="add-subcase-btn" class="btn btn-sm">+ 사건 추가</button>
         </div>
-        <div id="hearing-list" class="hearing-list"></div>
+        <p class="form-hint">관할기관마다(예: 법원 사건 + 경찰서 사건) 별도로 추가하세요.</p>
+        <div id="subcase-list" class="sublist"></div>
       </div>
 
+      <!-- 원고/피해자 -->
       <div class="form-section">
-        <h4>비고</h4>
-        <textarea id="f-memo" rows="3" placeholder="메모를 입력하세요 (선택)"></textarea>
+        <div class="form-section-header">
+          <h4>원고/피해자</h4>
+          <button type="button" id="add-plaintiff-btn" class="btn btn-sm">+ 추가</button>
+        </div>
+        <div id="plaintiff-list" class="sublist"></div>
+      </div>
+
+      <!-- 피고/피고인 -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <h4>피고/피고인</h4>
+          <button type="button" id="add-respondent-btn" class="btn btn-sm">+ 추가</button>
+        </div>
+        <div id="respondent-list" class="sublist"></div>
+      </div>
+
+      <!-- 담당변호사 -->
+      <div class="form-section">
+        <label>담당변호사
+          <select id="f-lawyer">
+            <option value="">선택 안 함</option>
+            <option value="대표님">대표님</option>
+            <option value="천솔비">천솔비</option>
+            <option value="김도영">김도영</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- 접수서류 -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <h4>접수서류</h4>
+          <button type="button" id="add-filing-btn" class="btn btn-sm">+ 추가</button>
+        </div>
+        <div id="filing-list" class="sublist"></div>
+      </div>
+
+      <!-- 보정명령 -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <h4>보정명령</h4>
+          <button type="button" id="add-correction-btn" class="btn btn-sm">+ 추가</button>
+        </div>
+        <div id="correction-list" class="sublist"></div>
+      </div>
+
+      <!-- 기일 -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <h4>기일</h4>
+          <button type="button" id="add-hearing-btn" class="btn btn-sm">+ 추가</button>
+        </div>
+        <div id="hearing-list" class="sublist"></div>
+      </div>
+
+      <!-- 제출서류 -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <h4>제출서류 (우리 측)</h4>
+          <button type="button" id="add-ourfiling-btn" class="btn btn-sm">+ 추가</button>
+        </div>
+        <div id="ourfiling-list" class="sublist"></div>
+      </div>
+
+      <!-- 상대방 제출서류 -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <h4>상대방 제출서류</h4>
+          <button type="button" id="add-oppfiling-btn" class="btn btn-sm">+ 추가</button>
+        </div>
+        <div id="oppfiling-list" class="sublist"></div>
+      </div>
+
+      <!-- 메모 -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <h4>메모</h4>
+          <button type="button" id="add-note-btn" class="btn btn-sm">+ 메모 추가</button>
+        </div>
+        <div id="note-list" class="sublist"></div>
       </div>
 
       <div class="modal-footer">
@@ -269,33 +302,6 @@
         </div>
       </div>
     </form>
-  </div>
-</div>
-
-<!-- 특정 날짜에 기일 추가 (캘린더에서 클릭 시) -->
-<div id="day-modal" class="modal-overlay" hidden>
-  <div class="modal modal-sm">
-    <div class="modal-header">
-      <h3 id="day-modal-title">기일 등록</h3>
-      <button class="modal-close" data-close="day-modal">&times;</button>
-    </div>
-    <div class="modal-body">
-      <div id="day-hearing-list" class="day-hearing-list"></div>
-      <hr />
-      <label>사건 선택
-        <select id="day-case-select"></select>
-      </label>
-      <label>기일 종류
-        <select id="day-hearing-type">
-          <option value="trial">재판기일</option>
-          <option value="pleading">변론기일</option>
-        </select>
-      </label>
-      <label>메모
-        <input type="text" id="day-hearing-note" placeholder="선택 입력" />
-      </label>
-      <button type="button" id="day-add-hearing-btn" class="btn btn-primary btn-block">이 날짜에 기일 추가</button>
-    </div>
   </div>
 </div>
 
