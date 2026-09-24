@@ -26,6 +26,8 @@ let calState = (() => {
 
 const HEARING_TYPES = ["변론기일", "선고기일", "조정기일", "심문기일", "기타"];
 const LAWYERS = ["대표님", "천솔비", "김도영"];
+const FILING_TYPES = ["소장", "고소장", "가압류신청서", "기타"];
+const SUBMISSION_TYPES = ["준비서면", "답변서", "의견서", "기타"];
 
 const STATUS_LABEL = { unfiled: "미접수", filed: "접수사건", inprogress: "진행사건", completed: "완료사건" };
 const STATUS_ORDER = ["unfiled", "filed", "inprogress", "completed"];
@@ -179,13 +181,13 @@ function effectiveStatus(m) {
 }
 
 /* ---------------- 표시용 도우미 ---------------- */
-function kindLabelHtml(kind) {
+function kindLabelHtml(kind, criminalProgress) {
   if (!kind) return `<span class="cell-empty">-</span>`;
   const parts = [];
   if (kind.civil) parts.push(`<span class="badge badge-civil">민사</span>`);
   if (kind.criminal) {
-    const cp = kind.criminalProgress || "";
-    parts.push(`<span class="badge badge-criminal">형사</span>`);
+    const cp = criminalProgress || "";
+    parts.push(`<span class="badge badge-criminal">형사${cp ? " · " + escapeHtml(cp) : ""}</span>`);
   }
   if (kind.family) parts.push(`<span class="badge badge-family">가사</span>`);
   if (kind.other) parts.push(`<span class="badge badge-other-kind">${escapeHtml(kind.otherText || "기타")}</span>`);
@@ -195,6 +197,21 @@ function kindLabelHtml(kind) {
 function firstPersonName(m) {
   return (m.plaintiffs && m.plaintiffs[0] && m.plaintiffs[0].name) ||
          (m.respondents && m.respondents[0] && m.respondents[0].name) || "";
+}
+/* 원고/피해자·피고/피고인 칸은 각각 "의뢰인" 또는 "상대방"으로 통째로 지정됩니다
+   (칸 안의 개별 인원마다 구분하지 않음). 아래 두 함수는 그 지정에 따라 의뢰인 쪽/상대방 쪽
+   인원 목록을 모아줍니다. */
+function clientPeople(m) {
+  const list = [];
+  if ((m.plaintiffsRole || "client") === "client") list.push(...(m.plaintiffs || []));
+  if ((m.respondentsRole || "opponent") === "client") list.push(...(m.respondents || []));
+  return list;
+}
+function opponentPeople(m) {
+  const list = [];
+  if ((m.plaintiffsRole || "client") === "opponent") list.push(...(m.plaintiffs || []));
+  if ((m.respondentsRole || "opponent") === "opponent") list.push(...(m.respondents || []));
+  return list;
 }
 function stackCell(items, renderFn, limit = 3) {
   if (!items || !items.length) return `<span class="cell-empty">-</span>`;
@@ -262,16 +279,16 @@ function renderCaseTable() {
     tr.innerHTML = `
       <td class="nowrap">${idx + 1}</td>
       <td class="nowrap"><span class="badge badge-status-${status}">${STATUS_LABEL[status]}</span>${statusTag}</td>
-      <td>${kindLabelHtml(m.kind)}</td>
+      <td>${kindLabelHtml(m.kind, m.criminalProgress)}</td>
       <td>${stackCell(m.subCases, (s) => `<span title="${escapeHtml(s.caseName || "")}">${escapeHtml(s.agency || "")} ${escapeHtml(s.caseNumber || "")}</span>`)}</td>
-      <td>${stackCell(m.plaintiffs, (p) => `<span class="chip-person chip-plaintiff">${escapeHtml(p.name)}</span>`)}</td>
-      <td>${stackCell(m.respondents, (r) => `<span class="chip-person chip-respondent">${escapeHtml(r.name)}</span>`)}</td>
+      <td>${stackCell(m.plaintiffs, (p) => `<span class="chip-person ${(m.plaintiffsRole || "client") === "client" ? "chip-client" : "chip-opponent"}">${escapeHtml(p.name)}</span>`)}</td>
+      <td>${stackCell(m.respondents, (r) => `<span class="chip-person ${(m.respondentsRole || "opponent") === "client" ? "chip-client" : "chip-opponent"}">${escapeHtml(r.name)}</span>`)}</td>
       <td class="nowrap">${escapeHtml(m.lawyer || "-")}</td>
-      <td>${stackCell(m.filings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(f.name || "")}`)}</td>
+      <td>${stackCell(m.filings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(docLabel(f))}`)}</td>
       <td>${stackCell(sortedCorrections, (c) => {
         const diff = c.deadline ? daysBetween(todayStr(), c.deadline) : null;
         let cls = "badge-dday-neutral", text = "";
-        if (c.completed) { cls = "badge-dday-done"; text = "완료"; }
+        if (c.submittedDate) { cls = "badge-dday-done"; text = "제출완료"; }
         else if (diff !== null) {
           cls = diff < 0 ? "badge-dday-danger" : diff <= 3 ? "badge-dday-warning" : "badge-dday-neutral";
           text = diff === 0 ? "D-DAY" : diff > 0 ? `D-${diff}` : `D+${-diff}`;
@@ -279,8 +296,8 @@ function renderCaseTable() {
         return `${escapeHtml(c.name || "보정명령")}${text ? ` <span class="badge badge-dday ${cls}">${text}</span>` : ""}`;
       })}</td>
       <td>${stackCell(sortedHearings, (h) => `<span class="badge ${h.type === "선고기일" ? "badge-hearing-verdict" : "badge-hearing-other"}">${escapeHtml(h.type || "기일")}</span> ${formatKorDate(h.date)}${h.time ? " " + h.time : ""}`)}</td>
-      <td>${stackCell(m.ourFilings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(f.name || "")}`)}</td>
-      <td>${stackCell(m.oppFilings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(f.name || "")}${f.submitter ? ` (${escapeHtml(f.submitter)})` : ""}`)}</td>
+      <td>${stackCell(m.ourFilings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(docLabel(f))}`)}</td>
+      <td>${stackCell(m.oppFilings, (f) => `${f.date ? formatKorDate(f.date) + " · " : ""}${escapeHtml(docLabel(f))}${f.submitter ? ` (${escapeHtml(f.submitter)})` : ""}`)}</td>
       <td>${(m.notes && m.notes.length) ? escapeHtml((m.notes[m.notes.length - 1].text || "").slice(0, 30)) + (m.notes.length > 1 ? ` 외 ${m.notes.length - 1}건` : "") : `<span class="cell-empty">-</span>`}</td>
       <td class="nowrap">
         <button class="btn btn-sm row-open-btn">열기</button>
@@ -330,11 +347,11 @@ function exportCasesCSV() {
       joinList(m.plaintiffs, (p) => p.name),
       joinList(m.respondents, (r) => r.name),
       m.lawyer || "",
-      joinList(m.filings, (f) => `${f.date || ""} ${f.name || ""}`),
-      joinList(m.corrections, (c) => `${c.name || ""}(기한:${c.deadline || "-"}${c.completed ? ",완료" : ""})`),
+      joinList(m.filings, (f) => `${f.date || ""} ${docLabel(f)}`),
+      joinList(m.corrections, (c) => `${c.name || ""}(송달:${c.date || "-"},마감:${c.deadline || "-"}${c.submittedDate ? ",제출:" + c.submittedDate : ""})`),
       joinList(m.hearings, (h) => `${h.date || ""} ${h.time || ""} ${h.type || ""}`),
-      joinList(m.ourFilings, (f) => `${f.date || ""} ${f.name || ""}`),
-      joinList(m.oppFilings, (f) => `${f.date || ""} ${f.name || ""}${f.submitter ? "(" + f.submitter + ")" : ""}`),
+      joinList(m.ourFilings, (f) => `${f.date || ""} ${docLabel(f)}`),
+      joinList(m.oppFilings, (f) => `${f.date || ""} ${docLabel(f)}${f.submitter ? "(" + f.submitter + ")" : ""}`),
       joinList(m.notes, (n) => `${n.date || ""} ${n.text || ""}`)
     ]);
   }
@@ -374,6 +391,9 @@ const criminalProgressRow = document.getElementById("criminal-progress-row");
 const fCriminalProgress = document.getElementById("f-criminal-progress");
 
 const fLawyer = document.getElementById("f-lawyer");
+
+const fPlaintiffsRole = document.getElementById("f-plaintiffs-role");
+const fRespondentsRole = document.getElementById("f-respondents-role");
 
 const subcaseListEl = document.getElementById("subcase-list");
 const plaintiffListEl = document.getElementById("plaintiff-list");
@@ -448,9 +468,18 @@ function ensureSubmitterDatalist() {
 }
 function refreshSubmitterDatalist() {
   const dl = ensureSubmitterDatalist();
-  const names = Array.from(respondentListEl.querySelectorAll('[data-field="name"]')).map((i) => i.value.trim()).filter(Boolean);
-  dl.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
+  const names = [];
+  if (fPlaintiffsRole.value === "opponent") {
+    names.push(...Array.from(plaintiffListEl.querySelectorAll('[data-field="name"]')).map((i) => i.value.trim()));
+  }
+  if (fRespondentsRole.value === "opponent") {
+    names.push(...Array.from(respondentListEl.querySelectorAll('[data-field="name"]')).map((i) => i.value.trim()));
+  }
+  dl.innerHTML = names.filter(Boolean).map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
 }
+fPlaintiffsRole.addEventListener("change", refreshSubmitterDatalist);
+fRespondentsRole.addEventListener("change", refreshSubmitterDatalist);
+plaintiffListEl.addEventListener("input", refreshSubmitterDatalist);
 
 /* ---- 공통: 행 생성 도우미 ---- */
 function appendSubrow(container, innerHtml, onRemove) {
@@ -520,16 +549,34 @@ function collectRespondents() {
 
 /* ---- 접수서류 (filings) ---- */
 document.getElementById("add-filing-btn").addEventListener("click", () => addFilingRow());
+filingListEl.addEventListener("change", (e) => {
+  if (e.target.matches('[data-field="type"]')) toggleOtherNote(e.target.closest(".subrow"));
+});
 function addFilingRow(f = {}) {
   appendSubrow(filingListEl, `
     <input type="date" data-field="date" value="${f.date || ""}" />
-    <input type="text" data-field="name" placeholder="서류명" value="${escapeHtml(f.name || "")}" />
+    <select data-field="type" class="subrow-select-sm">
+      ${FILING_TYPES.map((t) => `<option value="${t}" ${f.type === t ? "selected" : ""}>${t}</option>`).join("")}
+    </select>
+    <input type="text" data-field="note" placeholder="비고 (기타 내용 직접 입력)" value="${escapeHtml(f.note || "")}" ${(f.type || FILING_TYPES[0]) === "기타" ? "" : "hidden"} />
   `);
 }
 function collectFilings() {
   return rowsOf(filingListEl)
-    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), name: fieldVal(row, "name") }))
-    .filter((f) => f.date || f.name);
+    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), type: fieldVal(row, "type") || FILING_TYPES[0], note: fieldVal(row, "note") }))
+    .filter((f) => f.date || f.note);
+}
+/* 종류 select에서 "기타"를 고르면 비고 입력칸을 보여주고, 아니면 숨깁니다. (접수서류/제출서류/상대방 제출서류 공통) */
+function toggleOtherNote(row) {
+  const typeSel = row.querySelector('[data-field="type"]');
+  const noteInput = row.querySelector('[data-field="note"]');
+  if (!typeSel || !noteInput) return;
+  noteInput.hidden = typeSel.value !== "기타";
+}
+function docLabel(entry) {
+  if (!entry) return "";
+  if (entry.type === "기타") return entry.note ? entry.note : "기타";
+  return entry.type || entry.note || "";
 }
 
 /* ---- 보정명령 (corrections, D-day) ---- */
@@ -545,20 +592,20 @@ correctionListEl.addEventListener("change", (e) => {
 });
 function addCorrectionRow(c = {}) {
   const row = appendSubrow(correctionListEl, `
-    <input type="date" data-field="date" placeholder="발령일" value="${c.date || ""}" />
-    <input type="date" data-field="deadline" placeholder="기한" value="${c.deadline || ""}" />
-    <input type="text" data-field="name" placeholder="내용" value="${escapeHtml(c.name || "")}" />
-    <label class="subrow-checkbox-label"><input type="checkbox" data-field="completed" ${c.completed ? "checked" : ""} /> 완료</label>
+    <label class="subrow-field"><span class="subrow-field-label">내용</span><input type="text" data-field="name" placeholder="보정명령 내용" value="${escapeHtml(c.name || "")}" /></label>
+    <label class="subrow-field"><span class="subrow-field-label">송달일</span><input type="date" data-field="date" value="${c.date || ""}" /></label>
+    <label class="subrow-field"><span class="subrow-field-label">마감일</span><input type="date" data-field="deadline" value="${c.deadline || ""}" /></label>
+    <label class="subrow-field"><span class="subrow-field-label">제출일</span><input type="date" data-field="submittedDate" value="${c.submittedDate || ""}" /></label>
     <span class="badge badge-dday" data-dday></span>
   `);
   updateCorrectionRowDday(row);
 }
 function updateCorrectionRowDday(row) {
   const deadline = fieldVal(row, "deadline");
-  const completed = fieldVal(row, "completed");
+  const submittedDate = fieldVal(row, "submittedDate");
   const badge = row.querySelector("[data-dday]");
   if (!badge) return;
-  if (completed) { badge.textContent = "완료"; badge.className = "badge badge-dday badge-dday-done"; return; }
+  if (submittedDate) { badge.textContent = "제출완료"; badge.className = "badge badge-dday badge-dday-done"; return; }
   if (!deadline) { badge.textContent = ""; badge.className = "badge badge-dday"; return; }
   const diff = daysBetween(todayStr(), deadline);
   const cls = diff < 0 ? "badge-dday-danger" : diff <= 3 ? "badge-dday-warning" : "badge-dday-neutral";
@@ -567,8 +614,15 @@ function updateCorrectionRowDday(row) {
 }
 function collectCorrections() {
   return rowsOf(correctionListEl)
-    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), deadline: fieldVal(row, "deadline"), name: fieldVal(row, "name"), completed: fieldVal(row, "completed") }))
-    .filter((c) => c.date || c.deadline || c.name);
+    .map((row) => ({
+      id: row.dataset.id || uid(),
+      date: fieldVal(row, "date"),
+      deadline: fieldVal(row, "deadline"),
+      submittedDate: fieldVal(row, "submittedDate"),
+      name: fieldVal(row, "name"),
+      completed: !!fieldVal(row, "submittedDate")
+    }))
+    .filter((c) => c.date || c.deadline || c.submittedDate || c.name);
 }
 
 /* ---- 기일 (hearings) ---- */
@@ -601,31 +655,43 @@ function collectHearings() {
 
 /* ---- 제출서류 (우리 측, ourFilings) ---- */
 document.getElementById("add-ourfiling-btn").addEventListener("click", () => addOurFilingRow());
+ourfilingListEl.addEventListener("change", (e) => {
+  if (e.target.matches('[data-field="type"]')) toggleOtherNote(e.target.closest(".subrow"));
+});
 function addOurFilingRow(f = {}) {
   appendSubrow(ourfilingListEl, `
     <input type="date" data-field="date" value="${f.date || ""}" />
-    <input type="text" data-field="name" placeholder="서류명" value="${escapeHtml(f.name || "")}" />
+    <select data-field="type" class="subrow-select-sm">
+      ${SUBMISSION_TYPES.map((t) => `<option value="${t}" ${f.type === t ? "selected" : ""}>${t}</option>`).join("")}
+    </select>
+    <input type="text" data-field="note" placeholder="비고 (기타 내용 직접 입력)" value="${escapeHtml(f.note || "")}" ${(f.type || SUBMISSION_TYPES[0]) === "기타" ? "" : "hidden"} />
   `);
 }
 function collectOurFilings() {
   return rowsOf(ourfilingListEl)
-    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), name: fieldVal(row, "name") }))
-    .filter((f) => f.date || f.name);
+    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), type: fieldVal(row, "type") || SUBMISSION_TYPES[0], note: fieldVal(row, "note") }))
+    .filter((f) => f.date || f.note);
 }
 
 /* ---- 상대방 제출서류 (oppFilings) ---- */
 document.getElementById("add-oppfiling-btn").addEventListener("click", () => addOppFilingRow());
+oppfilingListEl.addEventListener("change", (e) => {
+  if (e.target.matches('[data-field="type"]')) toggleOtherNote(e.target.closest(".subrow"));
+});
 function addOppFilingRow(f = {}) {
   appendSubrow(oppfilingListEl, `
     <input type="date" data-field="date" value="${f.date || ""}" />
-    <input type="text" data-field="name" placeholder="서류명" value="${escapeHtml(f.name || "")}" />
+    <select data-field="type" class="subrow-select-sm">
+      ${SUBMISSION_TYPES.map((t) => `<option value="${t}" ${f.type === t ? "selected" : ""}>${t}</option>`).join("")}
+    </select>
+    <input type="text" data-field="note" placeholder="비고 (기타 내용 직접 입력)" value="${escapeHtml(f.note || "")}" ${(f.type || SUBMISSION_TYPES[0]) === "기타" ? "" : "hidden"} />
     <input type="text" data-field="submitter" placeholder="제출자" list="submitter-datalist" value="${escapeHtml(f.submitter || "")}" />
   `);
 }
 function collectOppFilings() {
   return rowsOf(oppfilingListEl)
-    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), name: fieldVal(row, "name"), submitter: fieldVal(row, "submitter") }))
-    .filter((f) => f.date || f.name);
+    .map((row) => ({ id: row.dataset.id || uid(), date: fieldVal(row, "date"), type: fieldVal(row, "type") || SUBMISSION_TYPES[0], note: fieldVal(row, "note"), submitter: fieldVal(row, "submitter") }))
+    .filter((f) => f.date || f.note || f.submitter);
 }
 
 /* ---- 메모 (notes) ---- */
@@ -674,6 +740,8 @@ function openCaseModal(caseId) {
     fKindOtherText.value = m.kind?.otherText || "";
     fCriminalProgress.value = m.criminalProgress || "";
     fLawyer.value = m.lawyer || "";
+    fPlaintiffsRole.value = m.plaintiffsRole || "client";
+    fRespondentsRole.value = m.respondentsRole || "opponent";
 
     (m.subCases || []).forEach(addSubcaseRow);
     (m.plaintiffs || []).forEach(addPlaintiffRow);
@@ -690,6 +758,8 @@ function openCaseModal(caseId) {
   } else {
     fCriminalProgress.value = "";
     fLawyer.value = "";
+    fPlaintiffsRole.value = "client";
+    fRespondentsRole.value = "opponent";
     modalStatusMode = "auto";
     modalManualStatus = "unfiled";
   }
@@ -711,7 +781,9 @@ caseForm.addEventListener("submit", async (e) => {
     criminalProgress: fCriminalProgress.value,
     subCases: collectSubcases(),
     plaintiffs: collectPlaintiffs(),
+    plaintiffsRole: fPlaintiffsRole.value,
     respondents: collectRespondents(),
+    respondentsRole: fRespondentsRole.value,
     lawyer: fLawyer.value,
     filings: collectFilings(),
     corrections: collectCorrections(),
@@ -897,8 +969,8 @@ function renderCalendar() {
       `;
       evEl.title = [
         caseNo,
-        `의뢰인: ${personNamesLabel(m.plaintiffs)}`,
-        `상대방: ${personNamesLabel(m.respondents)}`,
+        `의뢰인: ${personNamesLabel(clientPeople(m))}`,
+        `상대방: ${personNamesLabel(opponentPeople(m))}`,
         h.court ? `법정: ${h.court}` : "",
         h.location ? `장소/링크: ${h.location}` : ""
       ].filter(Boolean).join("\n");
@@ -942,7 +1014,7 @@ function renderClosedTab() {
     tr.innerHTML = `
       <td>${escapeHtml(caseNoLabel)}</td>
       <td>${escapeHtml(peopleLabel)}</td>
-      <td>${kindLabelHtml(m.kind)}</td>
+      <td>${kindLabelHtml(m.kind, m.criminalProgress)}</td>
       <td>${formatTimestampKorDate(m.closedAt)}</td>
       <td class="nowrap">
         <button type="button" class="btn btn-sm reopen-btn">다시 열기</button>

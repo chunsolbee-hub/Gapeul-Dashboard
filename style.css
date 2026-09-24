@@ -291,7 +291,8 @@ input, select, textarea {
 .badge-status-completed { background: var(--color-success-bg); color: var(--color-success); }
 .status-manual-tag { font-size: 10px; font-weight: 700; opacity: 0.75; margin-left: 3px; }
 
-/* 사람 역할 칩 (원고/피해자 = 빨강, 피고/피고인 = 파랑) */
+/* 사람 역할 칩 (의뢰인 = 빨강, 상대방 = 파랑) — 원고/피해자 칸인지 피고/피고인 칸인지가 아니라
+   각 칸에서 선택한 의뢰인/상대방 구분에 따라 색이 정해집니다. */
 .chip-person {
   display: inline-block;
   padding: 1px 8px;
@@ -299,8 +300,8 @@ input, select, textarea {
   font-size: 12px;
   font-weight: 600;
 }
-.chip-plaintiff { background: var(--color-plaintiff-bg); color: var(--color-plaintiff); }
-.chip-respondent { background: var(--color-respondent-bg); color: var(--color-respondent); }
+.chip-client { background: var(--color-plaintiff-bg); color: var(--color-plaintiff); }
+.chip-opponent { background: var(--color-respondent-bg); color: var(--color-respondent); }
 
 /* D-day 배지 */
 .badge-dday { font-size: 11px; padding: 1px 7px; }
@@ -402,8 +403,10 @@ input, select, textarea {
 .modal-body textarea { resize: vertical; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .form-section { border-top: 1px solid var(--color-border); padding-top: 14px; }
-.form-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.form-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; gap: 8px; }
 .form-hint { font-size: 12px; color: var(--color-text-muted); margin: 0 0 8px; }
+.section-header-actions { display: flex; align-items: center; gap: 8px; }
+.role-select { width: auto; margin: 0; flex: 0 0 auto; padding: 6px 8px; font-size: 12px; font-weight: 700; }
 
 /* ---------- 상태 섹션 ---------- */
 .status-section { border-top: none; padding-top: 0; }
@@ -440,6 +443,9 @@ input, select, textarea {
 .subrow input[type="checkbox"] { flex: 0 0 auto; width: auto; }
 .subrow textarea { flex: 1 1 100%; min-height: 44px; }
 .subrow-empty-msg { font-size: 12px; color: var(--color-text-muted); padding: 4px 2px; }
+.subrow-field { display: flex; flex-direction: column; gap: 2px; flex: 1 1 130px; min-width: 110px; }
+.subrow-field-label { font-size: 10px; font-weight: 700; color: var(--color-text-muted); }
+.subrow-field input { margin: 0; }
 .row-remove-btn {
   background: var(--color-danger-bg); color: var(--color-danger);
   border: none; border-radius: 6px; width: 26px; height: 26px; flex-shrink: 0;

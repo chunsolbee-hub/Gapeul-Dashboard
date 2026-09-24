@@ -211,8 +211,15 @@
       <div class="form-section">
         <div class="form-section-header">
           <h4>원고/피해자</h4>
-          <button type="button" id="add-plaintiff-btn" class="btn btn-sm">+ 추가</button>
+          <div class="section-header-actions">
+            <select id="f-plaintiffs-role" class="role-select">
+              <option value="client">의뢰인</option>
+              <option value="opponent">상대방</option>
+            </select>
+            <button type="button" id="add-plaintiff-btn" class="btn btn-sm">+ 추가</button>
+          </div>
         </div>
+        <p class="form-hint">이 칸에 등록하는 인원들이 전체적으로 의뢰인인지 상대방인지 선택하세요 (개별 구분 불필요).</p>
         <div id="plaintiff-list" class="sublist"></div>
       </div>
 
@@ -220,8 +227,15 @@
       <div class="form-section">
         <div class="form-section-header">
           <h4>피고/피고인</h4>
-          <button type="button" id="add-respondent-btn" class="btn btn-sm">+ 추가</button>
+          <div class="section-header-actions">
+            <select id="f-respondents-role" class="role-select">
+              <option value="client">의뢰인</option>
+              <option value="opponent">상대방</option>
+            </select>
+            <button type="button" id="add-respondent-btn" class="btn btn-sm">+ 추가</button>
+          </div>
         </div>
+        <p class="form-hint">이 칸에 등록하는 인원들이 전체적으로 의뢰인인지 상대방인지 선택하세요 (개별 구분 불필요).</p>
         <div id="respondent-list" class="sublist"></div>
       </div>
 
