@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>업무 To-Do 대시보드</title>
+<link rel="stylesheet" href="../style.css" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- 로그인 화면 -->
+<div id="login-screen" class="login-screen">
+  <div class="login-box">
+    <h1>업무 To-Do 대시보드</h1>
+    <p class="login-sub">등록된 계정으로 로그인하세요</p>
+    <form id="login-form">
+      <label>이메일
+        <input type="email" id="login-email" required autocomplete="username" />
+      </label>
+      <label>비밀번호
+        <input type="password" id="login-password" required autocomplete="current-password" />
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">로그인</button>
+      <p id="login-error" class="error-text"></p>
+    </form>
+    <p class="login-hint">사건관리 대시보드와 동일한 계정으로 로그인합니다.</p>
+  </div>
+</div>
+
+<!-- 메인 앱 -->
+<div id="app" class="app" hidden>
+  <header class="app-header">
+    <h1>업무 To-Do</h1>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="kanban">칸반 보드</button>
+      <button class="tab-btn" data-tab="done">완료 <span id="done-count-badge" class="count-badge" hidden>0</span></button>
+    </nav>
+    <div class="header-right">
+      <span id="user-email" class="user-email"></span>
+      <button id="logout-btn" class="btn btn-ghost">로그아웃</button>
+    </div>
+  </header>
+
+  <main class="app-main">
+
+    <!-- 칸반 보드 탭 -->
+    <section id="tab-kanban" class="tab-panel active">
+
+      <div class="pinned-memo">
+        <label for="global-memo">메모 <span class="pinned-memo-tag">스크롤해도 고정</span></label>
+        <textarea id="global-memo" rows="2" placeholder="자유롭게 메모를 남겨두세요 (자동 저장)"></textarea>
+      </div>
+
+      <div class="stat-tiles">
+        <div class="stat-tile">
+          <span class="stat-num" id="stat-total">0</span>
+          <span class="stat-label">전체 업무</span>
+        </div>
+        <div class="stat-tile stat-tile-warning">
+          <span class="stat-num" id="stat-due-today">0</span>
+          <span class="stat-label">오늘 마감</span>
+        </div>
+        <div class="stat-tile stat-tile-danger">
+          <span class="stat-num" id="stat-overdue">0</span>
+          <span class="stat-label">기한 초과</span>
+        </div>
+        <div class="stat-tile stat-tile-success">
+          <span class="stat-num" id="stat-done">0</span>
+          <span class="stat-label">완료됨</span>
+        </div>
+      </div>
+
+      <div class="panel-toolbar">
+        <h2>칸반 보드</h2>
+        <div class="toolbar-actions">
+          <input type="search" id="task-search" placeholder="제목 / 메모 / 분류 검색" />
+          <select id="filter-category"><option value="">전체 분류</option></select>
+          <select id="filter-priority">
+            <option value="">전체 중요도</option>
+            <option value="high">높음</option>
+            <option value="mid">보통</option>
+            <option value="low">낮음</option>
+          </select>
+          <button type="button" id="new-task-btn" class="btn btn-primary">+ 새 업무</button>
+        </div>
+      </div>
+
+      <div class="kanban-board">
+        <div class="kanban-col" data-status="todo">
+          <div class="kanban-col-header">
+            <h3>할 일</h3>
+            <span class="kanban-col-count" id="count-todo">0</span>
+          </div>
+          <div class="kanban-col-body" id="col-todo" data-status="todo"></div>
+        </div>
+        <div class="kanban-col" data-status="inprogress">
+          <div class="kanban-col-header">
+            <h3>진행 중</h3>
+            <span class="kanban-col-count" id="count-inprogress">0</span>
+          </div>
+          <div class="kanban-col-body" id="col-inprogress" data-status="inprogress"></div>
+        </div>
+        <div class="kanban-col" data-status="misc">
+          <div class="kanban-col-header">
+            <h3>기타 부가 업무</h3>
+            <span class="kanban-col-count" id="count-misc">0</span>
+          </div>
+          <div class="kanban-col-body" id="col-misc" data-status="misc"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 완료 탭 -->
+    <section id="tab-done" class="tab-panel">
+      <div class="panel-toolbar">
+        <h2>완료된 업무</h2>
+        <div class="toolbar-actions">
+          <input type="search" id="done-search" placeholder="제목 / 메모 / 분류 검색" />
+        </div>
+      </div>
+      <div class="done-list" id="done-list"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- 업무 추가/수정 모달 -->
+<div id="task-modal" class="modal-overlay" hidden>
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3 id="task-modal-title">새 업무</h3>
+      <button type="button" class="modal-close" data-close-modal>&times;</button>
+    </div>
+    <form id="task-form">
+      <div class="modal-body">
+        <label>제목
+          <input type="text" id="t-title" required placeholder="업무 제목" />
+        </label>
+        <div class="form-row">
+          <label>분류
+            <input type="text" id="t-category" list="category-datalist" placeholder="예: 소송, 행정, 개인" />
+            <datalist id="category-datalist"></datalist>
+          </label>
+          <label>중요도
+            <select id="t-priority">
+              <option value="high">높음</option>
+              <option value="mid" selected>보통</option>
+              <option value="low">낮음</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>진행 상태
+            <select id="t-status">
+              <option value="todo">할 일</option>
+              <option value="inprogress">진행 중</option>
+              <option value="misc">기타 부가 업무</option>
+              <option value="done">완료</option>
+            </select>
+          </label>
+          <label>마감일
+            <input type="date" id="t-due" />
+          </label>
+        </div>
+        <label>메모
+          <textarea id="t-notes" rows="3" placeholder="세부 내용, 참고사항 등"></textarea>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <div class="footer-left">
+          <button type="button" id="task-delete-btn" class="btn btn-danger" hidden>삭제</button>
+        </div>
+        <div class="footer-right">
+          <button type="button" class="btn btn-ghost" data-close-modal>취소</button>
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
