@@ -1137,8 +1137,9 @@ function renderClosedTab() {
         <button type="button" class="btn btn-sm btn-danger permanent-delete-btn">영구종결</button>
       </td>
     `;
-    tr.querySelector(".reopen-btn").addEventListener("click", () => reopenCase(m.id));
-    tr.querySelector(".permanent-delete-btn").addEventListener("click", () => permanentlyDeleteCase(m.id));
+    tr.querySelector(".reopen-btn").addEventListener("click", (e) => { e.stopPropagation(); reopenCase(m.id); });
+    tr.querySelector(".permanent-delete-btn").addEventListener("click", (e) => { e.stopPropagation(); permanentlyDeleteCase(m.id); });
+    tr.addEventListener("click", () => openCaseModal(m.id));
     closedTableBody.appendChild(tr);
   }
 }
