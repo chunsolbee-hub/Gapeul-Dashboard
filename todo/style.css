@@ -145,7 +145,9 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  cursor: pointer;
 }
+.done-row:hover { background: #f9fafb; }
 .done-row-title { font-size: 13px; font-weight: 700; flex: 1 1 200px; text-decoration: line-through; color: var(--color-text-muted); }
 .done-row-actions { display: flex; gap: 6px; }
 

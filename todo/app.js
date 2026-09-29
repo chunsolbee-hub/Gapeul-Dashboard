@@ -319,10 +319,12 @@ function renderDone() {
         <button type="button" class="btn btn-sm btn-danger delete-btn">삭제</button>
       </div>
     `;
-    row.querySelector(".restore-btn").addEventListener("click", () => restoreTask(t.id));
-    row.querySelector(".delete-btn").addEventListener("click", () => {
+    row.querySelector(".restore-btn").addEventListener("click", (e) => { e.stopPropagation(); restoreTask(t.id); });
+    row.querySelector(".delete-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
       if (confirm("이 업무를 완전히 삭제할까요?")) deleteDoc(doc(db, "tasks", t.id));
     });
+    row.addEventListener("click", () => openTaskModal(t.id));
     container.appendChild(row);
   });
 }
